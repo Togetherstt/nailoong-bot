@@ -1,14 +1,16 @@
+import importlib
 import tempfile
 import unittest
 from pathlib import Path
 from random import Random
-import importlib
 
 homophone_plugin = importlib.import_module("src.plugins.homophone_box")
-from src.plugins.homophone_box.store import (
+from src.plugins.homophone_box.store import (  # noqa: E402
+    InitialsEntry,
     InitialsStore,
     extract_chinese_text,
     extract_homophone_tokens,
+    find_homophone_matches,
     find_homophone_results,
     is_valid_quote_text,
     limit_homophone_results,
@@ -42,6 +44,32 @@ class InitialsStoreTestCase(unittest.IsolatedAsyncioTestCase):
         deleted = await self.store.delete_initials("yzh")
         self.assertTrue(deleted)
         self.assertEqual(await self.store.list_initials(), [])
+
+    async def test_add_initials_with_bound_member(self) -> None:
+        inserted = await self.store.add_initials("yzh", member_qq="123456")
+        self.assertTrue(inserted)
+        self.assertEqual(
+            await self.store.list_entries(),
+            [InitialsEntry(initials="yzh", member_qq="123456")],
+        )
+
+    async def test_bind_member_updates_existing_entry(self) -> None:
+        await self.store.add_initials("yzh")
+        updated = await self.store.bind_member("yzh", "123456")
+        self.assertTrue(updated)
+        self.assertEqual(
+            await self.store.list_entries(),
+            [InitialsEntry(initials="yzh", member_qq="123456")],
+        )
+
+    async def test_unbind_member_keeps_initials(self) -> None:
+        await self.store.add_initials("yzh", member_qq="123456")
+        updated = await self.store.unbind_member("yzh")
+        self.assertTrue(updated)
+        self.assertEqual(
+            await self.store.list_entries(),
+            [InitialsEntry(initials="yzh", member_qq=None)],
+        )
 
 
 class HomophoneHelperTestCase(unittest.TestCase):
@@ -100,6 +128,15 @@ class HomophoneHelperTestCase(unittest.TestCase):
         results = find_homophone_results("杨abc魂", ["yah"])
         self.assertIn("杨abc魂", results)
 
+    def test_find_homophone_matches_keep_bound_member(self) -> None:
+        matches = find_homophone_matches(
+            "杨州话真的好",
+            [InitialsEntry(initials="yzh", member_qq="123456")],
+        )
+        self.assertTrue(matches)
+        self.assertIn("杨州话", [match.candidate for match in matches])
+        self.assertTrue(all(match.member_qq == "123456" for match in matches))
+
     def test_limit_homophone_results(self) -> None:
         results = [f"result{i}" for i in range(12)]
         limited = limit_homophone_results(results, rng=Random(123))
@@ -137,3 +174,17 @@ class HomophoneHelperTestCase(unittest.TestCase):
         homophone_plugin._prune_recent_quote_hits(now=105.1)
         self.assertNotIn("expired", homophone_plugin.recent_quote_hits)
         self.assertIn("fresh", homophone_plugin.recent_quote_hits)
+
+    def test_allowed_group_ids_parser(self) -> None:
+        class DummyConfig:
+            homophone_group_ids = "123, 456 ,789"
+
+        original_get_driver = homophone_plugin.get_driver
+        homophone_plugin.get_driver = lambda: type("DummyDriver", (), {"config": DummyConfig()})()
+        try:
+            self.assertEqual(
+                homophone_plugin._get_allowed_homophone_group_ids(),
+                {"123", "456", "789"},
+            )
+        finally:
+            homophone_plugin.get_driver = original_get_driver
