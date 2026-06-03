@@ -1,0 +1,23 @@
+[project]
+name = "nailoong-bot"
+version = "0.1.0"
+description = "Custom QQ bot based on NoneBot2, OneBot V11 and NapCatQQ."
+readme = "README.md"
+requires-python = ">=3.10,<4.0"
+dependencies = [
+    "nonebot2[fastapi]>=2.5.0,<2.6.0",
+    "nonebot-adapter-onebot>=2.4.6,<2.5.0",
+    "nb-cli>=1.4.2,<2.0.0",
+    "httpx>=0.28.1,<0.29.0",
+    "pypinyin>=0.55.0,<0.56.0",
+]
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.nonebot]
+plugins = []
+plugin_dirs = ["src/plugins"]
+adapters = [{ name = "OneBot V11", module_name = "nonebot.adapters.onebot.v11" }]
+builtin_plugins = []
