@@ -209,7 +209,9 @@ def extract_chinese_text(text: str) -> str:
 
 def is_valid_quote_text(text: str, max_chinese_chars: int = 40) -> bool:
     chinese_text = extract_chinese_text(text)
-    return 0 < len(chinese_text) <= max_chinese_chars
+    if len(chinese_text) > max_chinese_chars:
+        return False
+    return bool(chinese_text) or bool(extract_english_words(text))
 
 
 def find_homophone_results(
@@ -224,12 +226,33 @@ def find_homophone_matches(
     initials_entries: list[str] | list[InitialsEntry],
 ) -> list[HomophoneMatch]:
     tokens = extract_homophone_tokens(quoted_text)
-    if len(tokens) < 2:
-        return []
-
     normalized_entries = _normalize_entries(initials_entries)
     matches: list[HomophoneMatch] = []
     seen: set[tuple[str, str]] = set()
+
+    if not normalized_entries:
+        return []
+
+    english_words = extract_english_words(quoted_text)
+    entry_map = {entry.initials: entry for entry in normalized_entries}
+    for word in english_words:
+        entry = entry_map.get(word.lower())
+        if entry is None:
+            continue
+        key = (entry.initials, word)
+        if key in seen:
+            continue
+        seen.add(key)
+        matches.append(
+            HomophoneMatch(
+                candidate=word,
+                initials=entry.initials,
+                member_qq=entry.member_qq,
+            )
+        )
+
+    if len(tokens) < 2:
+        return matches
 
     grouped_targets: dict[int, list[InitialsEntry]] = {}
     for entry in normalized_entries:
@@ -319,6 +342,10 @@ def extract_homophone_tokens(text: str) -> list[HomophoneToken]:
             continue
         tokens.append(HomophoneToken(text=chunk, initial=chunk[0].lower()))
     return tokens
+
+
+def extract_english_words(text: str) -> list[str]:
+    return re.findall(r"(?:(?<=^)|(?<=[\s\u4e00-\u9fff]))([A-Za-z]+)(?=$|[\s\u4e00-\u9fff])", text)
 
 
 def get_char_initial(char: str) -> str:

@@ -6,6 +6,7 @@ from random import Random
 
 homophone_plugin = importlib.import_module("src.plugins.homophone_box")
 from src.plugins.homophone_box.store import (  # noqa: E402
+    extract_english_words,
     InitialsEntry,
     InitialsStore,
     extract_chinese_text,
@@ -89,8 +90,15 @@ class HomophoneHelperTestCase(unittest.TestCase):
         self.assertEqual([token.text for token in tokens], ["杨", "abc", "之", "魂"])
         self.assertEqual([token.initial for token in tokens], ["y", "a", "z", "h"])
 
+    def test_extract_english_words(self) -> None:
+        self.assertEqual(extract_english_words("hello world"), ["hello", "world"])
+        self.assertEqual(extract_english_words("杨 hello 魂 world"), ["hello", "world"])
+        self.assertEqual(extract_english_words("杨hello魂 world"), ["hello", "world"])
+        self.assertEqual(extract_english_words("hello-world"), [])
+
     def test_is_valid_quote_text(self) -> None:
         self.assertTrue(is_valid_quote_text("杨知寒"))
+        self.assertTrue(is_valid_quote_text("hello world"))
         self.assertFalse(is_valid_quote_text(""))
         self.assertTrue(is_valid_quote_text("这是一个三十个字以内的测试文本用于放宽长度限制"))
         self.assertFalse(
@@ -127,6 +135,23 @@ class HomophoneHelperTestCase(unittest.TestCase):
     def test_find_homophone_results_supports_mixed_english_and_chinese(self) -> None:
         results = find_homophone_results("杨abc魂", ["yah"])
         self.assertIn("杨abc魂", results)
+
+    def test_find_homophone_results_supports_whole_english_word_match(self) -> None:
+        results = find_homophone_results("hello world", ["hello"])
+        self.assertIn("hello", results)
+
+    def test_find_homophone_results_supports_pure_english_initials_match(self) -> None:
+        results = find_homophone_results("hello world", ["hw"])
+        self.assertIn("helloworld", results)
+
+    def test_find_homophone_matches_supports_whole_english_word_binding(self) -> None:
+        matches = find_homophone_matches(
+            "hello world",
+            [InitialsEntry(initials="hello", member_qq="123456")],
+        )
+        self.assertTrue(matches)
+        self.assertEqual(matches[0].candidate, "hello")
+        self.assertEqual(matches[0].member_qq, "123456")
 
     def test_find_homophone_matches_keep_bound_member(self) -> None:
         matches = find_homophone_matches(
