@@ -43,7 +43,12 @@ async def handle_homophone_message(bot: Bot, event: MessageEvent) -> None:
         "/首字母列表",
         "/删除首字母",
         "/谐音盒",
+        "/盒",
     }:
+        return
+
+    if command in {"/谐音盒", "/盒"} and (argument or "").strip().lower() in {"help", "帮助"}:
+        await _handle_help(bot, event)
         return
 
     if command == "/添加首字母":
@@ -71,8 +76,12 @@ async def handle_homophone_message(bot: Bot, event: MessageEvent) -> None:
 
 @homophone_quick_message.handle()
 async def handle_quick_homophone_message(bot: Bot, event: MessageEvent) -> None:
-    command, _ = _extract_command(event.get_message().extract_plain_text())
+    command, argument = _extract_command(event.get_message().extract_plain_text())
     if command != "/盒":
+        return
+
+    if (argument or "").strip().lower() in {"help", "帮助"}:
+        await _handle_help(bot, event)
         return
 
     await _handle_homophone_box(bot, event, command_label="/盒")
@@ -339,6 +348,24 @@ async def _handle_homophone_box(
     finally:
         async with homophone_pending_lock:
             homophone_pending_jobs -= 1
+
+
+async def _handle_help(bot: Bot, event: MessageEvent) -> None:
+    await bot.send(
+        event,
+        (
+            "盒功能用法：\n"
+            "1. 发送 `@机器人 /添加首字母 yz~yzzhh` 可新增 2 到 5 位首字母模式。\n"
+            "2. 发送 `@机器人 /添加首字母 首字母 @群友` 可在新增时直接绑定群友。\n"
+            "3. 发送 `@机器人 /绑定群友 首字母 @群友`、`@机器人 /解绑群友 首字母` 管理绑定关系。\n"
+            "4. 发送 `@机器人 /首字母列表` 查看当前首字母库。\n"
+            "5. 发送 `@机器人 /删除首字母 首字母` 删除指定模式。\n"
+            "6. 引用文本后发送 `@机器人 /谐音盒` 或直接发送 `/盒` 触发匹配。\n"
+            "7. 发送 `/盒 help` 查看本帮助。\n"
+            "说明：只有 `/盒` 和 `/盒 help` 不需要 @机器人，其余管理命令仍然需要。"
+        ),
+        reply_message=True,
+    )
 
 
 def _extract_command(plain_text: str) -> tuple[str, Optional[str]]:

@@ -18,6 +18,7 @@ from .store import (
 
 store = NailoongStore()
 nailoong_message = on_message(rule=to_me(), priority=10, block=False)
+nailoong_help_message = on_message(priority=10, block=False)
 
 
 @nailoong_message.handle()
@@ -29,7 +30,12 @@ async def handle_nailoong_message(bot: Bot, event: MessageEvent) -> None:
         "/奶龙列表",
         "/删除奶龙",
         "/撤销删除奶龙",
+        "/奶龙",
     }:
+        return
+
+    if command == "/奶龙":
+        await _handle_help(bot, event, argument)
         return
 
     if command == "/添加奶龙":
@@ -52,6 +58,14 @@ async def handle_nailoong_message(bot: Bot, event: MessageEvent) -> None:
         return
 
     await _handle_delete_nailoong(bot, event, argument)
+
+
+@nailoong_help_message.handle()
+async def handle_nailoong_help_message(bot: Bot, event: MessageEvent) -> None:
+    command, argument = extract_command_name(event.message)
+    if command != "/奶龙":
+        return
+    await _handle_help(bot, event, argument)
 
 
 async def _handle_add_nailoong(
@@ -213,6 +227,27 @@ async def _handle_undo_delete(bot: Bot, event: MessageEvent) -> None:
     await bot.send(
         event,
         f"已恢复奶龙：{restored.display_name}",
+        reply_message=True,
+    )
+
+
+async def _handle_help(bot: Bot, event: MessageEvent, argument: Optional[str]) -> None:
+    help_arg = (argument or "").strip().lower()
+    if help_arg not in {"help", "帮助"}:
+        return
+
+    await bot.send(
+        event,
+        (
+            "奶龙功能用法：\n"
+            "1. 先引用一张奶龙图片或 QQ 表情，再发送 `@机器人 /添加奶龙 名称可选`。\n"
+            "2. 发送 `@机器人 /随机奶龙`，随机抽取一条奶龙记录。\n"
+            "3. 管理员可发送 `@机器人 /奶龙列表` 查看库存。\n"
+            "4. 管理员可发送 `@机器人 /删除奶龙 序号`、`@机器人 /删除奶龙 名称` 或 `@机器人 /删除奶龙 最近一个` 删除记录。\n"
+            "5. 管理员可发送 `@机器人 /撤销删除奶龙` 恢复最近一次删除。\n"
+            "6. 发送 `/奶龙 help` 查看本帮助。\n"
+            "说明：只有 `/奶龙 help` 不需要 @机器人，其他奶龙命令仍然需要。"
+        ),
         reply_message=True,
     )
 

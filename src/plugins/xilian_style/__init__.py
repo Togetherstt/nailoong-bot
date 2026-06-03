@@ -12,17 +12,23 @@ from .store import XiLianModeStore, extract_command, is_valid_quoted_text
 
 mode_store = XiLianModeStore()
 xilian_message = on_message(rule=to_me(), priority=10, block=False)
+xilian_help_message = on_message(priority=10, block=False)
 
 
 @xilian_message.handle()
 async def handle_xilian_message(bot: Bot, event: MessageEvent) -> None:
-    command, _ = extract_command(event.get_message().extract_plain_text())
+    command, argument = extract_command(event.get_message().extract_plain_text())
     if command not in {
         "/昔涟改写",
         "/昔涟回复",
         "/开启昔涟模式",
         "/关闭昔涟模式",
+        "/昔涟",
     }:
+        return
+
+    if command == "/昔涟":
+        await _handle_help(bot, event, argument)
         return
 
     if command == "/开启昔涟模式":
@@ -89,6 +95,14 @@ async def handle_xilian_message(bot: Bot, event: MessageEvent) -> None:
     await bot.send(event, result, reply_message=True)
 
 
+@xilian_help_message.handle()
+async def handle_xilian_help_message(bot: Bot, event: MessageEvent) -> None:
+    command, argument = extract_command(event.get_message().extract_plain_text())
+    if command != "/昔涟":
+        return
+    await _handle_help(bot, event, argument)
+
+
 async def _handle_toggle(bot: Bot, event: MessageEvent, enabled: bool) -> None:
     if not _is_admin_user(event):
         await bot.send(event, "您没有管理权限，无法开启", reply_message=True)
@@ -97,6 +111,26 @@ async def _handle_toggle(bot: Bot, event: MessageEvent, enabled: bool) -> None:
     await mode_store.set_enabled(enabled)
     message = "昔涟模式已开启。" if enabled else "昔涟模式已关闭。"
     await bot.send(event, message, reply_message=True)
+
+
+async def _handle_help(bot: Bot, event: MessageEvent, argument: Optional[str]) -> None:
+    help_arg = (argument or "").strip().lower()
+    if help_arg not in {"help", "帮助"}:
+        return
+
+    await bot.send(
+        event,
+        (
+            "昔涟功能用法：\n"
+            "1. 管理员发送 `@机器人 /开启昔涟模式` 开启功能。\n"
+            "2. 管理员发送 `@机器人 /关闭昔涟模式` 关闭功能。\n"
+            "3. 引用一段不超过 200 字的话后发送 `@机器人 /昔涟改写`，获取昔涟口吻改写。\n"
+            "4. 引用一段不超过 200 字的话后发送 `@机器人 /昔涟回复`，获取昔涟口吻回复。\n"
+            "5. 发送 `/昔涟 help` 查看本帮助。\n"
+            "说明：只有 `/昔涟 help` 不需要 @机器人，其他昔涟命令仍然需要。"
+        ),
+        reply_message=True,
+    )
 
 
 def _is_admin_user(event: MessageEvent) -> bool:
