@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Optional
 
 import httpx
-from nonebot import logger, on_message
+from nonebot import get_driver, logger, on_message
 from nonebot.adapters.onebot.v11 import Bot, MessageEvent
 from nonebot.rule import to_me
 
@@ -16,7 +16,6 @@ from .store import (
     guess_extension_from_url,
 )
 
-ADMIN_QQ = "2484941428"
 store = NailoongStore()
 nailoong_message = on_message(rule=to_me(), priority=10, block=False)
 
@@ -41,7 +40,7 @@ async def handle_nailoong_message(bot: Bot, event: MessageEvent) -> None:
         await _handle_random_nailoong(bot, event)
         return
 
-    if str(event.user_id) != ADMIN_QQ:
+    if not _is_admin_user(event):
         return
 
     if command == "/奶龙列表":
@@ -224,3 +223,17 @@ async def _download_image(url: str) -> bytes:
         response = await client.get(url)
         response.raise_for_status()
         return response.content
+
+
+def _is_admin_user(event: MessageEvent) -> bool:
+    admin_qq = _get_admin_qq()
+    return admin_qq is not None and str(event.user_id) == admin_qq
+
+
+def _get_admin_qq() -> Optional[str]:
+    config = get_driver().config
+    admin_qq = getattr(config, "admin_qq", None)
+    if admin_qq is None:
+        return None
+    value = str(admin_qq).strip()
+    return value or None
