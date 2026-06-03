@@ -2,10 +2,17 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from src.plugins.xilian_style.client import build_api_config
+import httpx
+
+from src.plugins.xilian_style.client import (
+    XiLianApiConfig,
+    XiLianApiError,
+    _extract_response_content,
+    build_api_config,
+    build_request_payload,
+)
 from src.plugins.xilian_style.store import (
     MUSICAL_NOTE,
-    RollingWindowLimiter,
     XiLianModeStore,
     build_system_prompt,
     build_user_prompt,
@@ -41,11 +48,7 @@ class XiLianHelperTestCase(unittest.TestCase):
         self.assertTrue(is_valid_quoted_text("我喜欢你"))
         self.assertTrue(is_valid_quoted_text("hello world"))
         self.assertFalse(is_valid_quoted_text(""))
-        self.assertFalse(
-            is_valid_quoted_text(
-                "这是一段为了测试昔涟改写长度限制而专门准备的超长文本需要明显超过四十个字符才可以正确触发校验"
-            )
-        )
+        self.assertFalse(is_valid_quoted_text("a" * 201))
 
     def test_system_prompt_mentions_u266a_rules(self) -> None:
         prompt = build_system_prompt("rewrite")
@@ -64,17 +67,9 @@ class XiLianHelperTestCase(unittest.TestCase):
         self.assertFalse(result.endswith(f"{MUSICAL_NOTE}。"))
 
     def test_sanitize_xilian_output_truncates_to_max_chars(self) -> None:
-        result = sanitize_xilian_output("a" * 120)
-        self.assertLessEqual(len(result), 80)
+        result = sanitize_xilian_output("a" * 260)
+        self.assertLessEqual(len(result), 200)
         self.assertTrue(result.endswith(MUSICAL_NOTE))
-
-    def test_rolling_window_limiter(self) -> None:
-        limiter = RollingWindowLimiter(limit=3, window_seconds=60.0)
-        self.assertTrue(limiter.allow_sync(now=0.0))
-        self.assertTrue(limiter.allow_sync(now=1.0))
-        self.assertTrue(limiter.allow_sync(now=2.0))
-        self.assertFalse(limiter.allow_sync(now=3.0))
-        self.assertTrue(limiter.allow_sync(now=61.0))
 
     def test_build_api_config(self) -> None:
         config = build_api_config(
@@ -87,3 +82,82 @@ class XiLianHelperTestCase(unittest.TestCase):
         assert config is not None
         self.assertEqual(config.model, "test-model")
         self.assertEqual(config.timeout_seconds, 15.0)
+
+    def test_build_api_config_falls_back_to_default_model(self) -> None:
+        config = build_api_config(
+            xilian_api_url="https://example.com/v1/chat/completions",
+            xilian_api_key="sk-test",
+            xilian_api_model="",
+        )
+        self.assertIsNotNone(config)
+        assert config is not None
+        self.assertEqual(config.model, "gpt-5-mini")
+
+    def test_build_request_payload_uses_responses_shape(self) -> None:
+        payload = build_request_payload(
+            XiLianApiConfig(
+                url="https://example.com/v1/responses",
+                api_key="sk-test",
+                model="gpt-5.4",
+            ),
+            task="rewrite",
+            quoted_text="我喜欢你",
+        )
+        self.assertEqual(payload["model"], "gpt-5.4")
+        self.assertIn("instructions", payload)
+        self.assertEqual(payload["input"], "请把这句话改写成昔涟口吻：我喜欢你")
+        self.assertEqual(payload["text"]["format"]["type"], "text")
+        self.assertEqual(payload["store"], False)
+        self.assertEqual(payload["stream"], False)
+
+    def test_extract_content_supports_output_text(self) -> None:
+        response = httpx.Response(
+            200,
+            headers={"content-type": "application/json"},
+            json={"output_text": "人家把晚风装进心事里啦♪"},
+        )
+        self.assertEqual(_extract_response_content(response), "人家把晚风装进心事里啦♪")
+
+    def test_extract_content_supports_response_field(self) -> None:
+        response = httpx.Response(
+            200,
+            headers={"content-type": "application/json"},
+            json={"response": "人家把心事轻轻放进晚风里呢♪"},
+        )
+        self.assertEqual(_extract_response_content(response), "人家把心事轻轻放进晚风里呢♪")
+
+    def test_extract_content_supports_output_item_text(self) -> None:
+        response = httpx.Response(
+            200,
+            headers={"content-type": "application/json"},
+            json={"output": [{"text": "人家也会把思念说给星星听呀♪"}]},
+        )
+        self.assertEqual(_extract_response_content(response), "人家也会把思念说给星星听呀♪")
+
+    def test_extract_response_content_raises_for_empty_json_content(self) -> None:
+        response = httpx.Response(
+            200,
+            headers={"content-type": "application/json"},
+            json={"choices": [{"message": {"role": "assistant"}}]},
+        )
+        with self.assertRaises(XiLianApiError) as ctx:
+            _extract_response_content(response)
+        self.assertEqual(ctx.exception.code, "empty_json_content")
+
+    def test_extract_response_content_supports_plain_text(self) -> None:
+        response = httpx.Response(
+            200,
+            headers={"content-type": "text/plain; charset=utf-8"},
+            text="人家把晚风装进心事里啦♪",
+        )
+        self.assertEqual(_extract_response_content(response), "人家把晚风装进心事里啦♪")
+
+    def test_extract_response_content_supports_sse(self) -> None:
+        response = httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            text='data: {"choices":[{"delta":{"content":"人家"}}]}\n'
+            'data: {"choices":[{"delta":{"content":"喜欢你♪"}}]}\n'
+            "data: [DONE]\n",
+        )
+        self.assertEqual(_extract_response_content(response), "人家喜欢你♪")

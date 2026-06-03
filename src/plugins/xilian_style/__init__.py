@@ -7,11 +7,10 @@ from nonebot.adapters.onebot.v11 import Bot, MessageEvent
 from nonebot.rule import to_me
 
 from .client import XiLianApiError, build_api_config, generate_xilian_text
-from .store import RollingWindowLimiter, XiLianModeStore, extract_command, is_valid_quoted_text
+from .store import XiLianModeStore, extract_command, is_valid_quoted_text
 
 
 mode_store = XiLianModeStore()
-request_limiter = RollingWindowLimiter(limit=3, window_seconds=60.0)
 xilian_message = on_message(rule=to_me(), priority=10, block=False)
 
 
@@ -50,16 +49,7 @@ async def handle_xilian_message(bot: Bot, event: MessageEvent) -> None:
     if not is_valid_quoted_text(quoted_text):
         await bot.send(
             event,
-            "引用内容不能为空，且长度不能超过 40 个字。",
-            reply_message=True,
-        )
-        return
-
-    allowed = await request_limiter.allow()
-    if not allowed:
-        await bot.send(
-            event,
-            "1 分钟内调用次数过多，暂时关闭 api 接口",
+            "引用内容不能为空，且长度不能超过 200 个字。",
             reply_message=True,
         )
         return
@@ -76,8 +66,11 @@ async def handle_xilian_message(bot: Bot, event: MessageEvent) -> None:
     task = "rewrite" if command == "/昔涟改写" else "reply"
     try:
         result = await generate_xilian_text(config, task=task, quoted_text=quoted_text)
-    except XiLianApiError:
-        logger.exception("XiLian API call failed")
+    except XiLianApiError as exc:
+        logger.error(
+            f"XiLian API call failed: code={exc.code} detail={exc.detail!r} "
+            f"model={config.model} url={config.url}"
+        )
         await bot.send(
             event,
             "昔涟改写服务暂时不可用，请稍后再试。",
@@ -128,5 +121,6 @@ def _get_api_config():
         xilian_api_model=getattr(config, "xilian_api_model", ""),
         fallback_url=getattr(config, "vision_api_url", ""),
         fallback_key=getattr(config, "vision_api_key", ""),
+        fallback_model=getattr(config, "vision_api_model", "") or "gpt-5-mini",
         timeout_seconds=getattr(config, "xilian_api_timeout", 20.0),
     )

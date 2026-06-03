@@ -101,9 +101,9 @@ HOMOPHONE_GROUP_IDS=123456789,987654321
 SUPERUSERS=[]
 VISION_API_URL=https://api.example.com/v1/chat/completions
 VISION_API_KEY=sk-xxxxxx
-XILIAN_API_URL=https://api.example.com/v1/chat/completions
+XILIAN_API_URL=https://api.example.com/v1/responses
 XILIAN_API_KEY=sk-xxxxxx
-XILIAN_API_MODEL=your-text-model
+XILIAN_API_MODEL=gpt-5.4
 XILIAN_API_TIMEOUT=20
 ```
 
@@ -134,7 +134,7 @@ XILIAN_API_TIMEOUT=20
 - `VISION_API_KEY`
   - 对应的 API Key
 - `XILIAN_API_URL`
-  - 昔涟改写功能的文本生成接口地址
+  - 昔涟改写功能的 Responses API 接口地址
   - 留空时会回退到 `VISION_API_URL`
 - `XILIAN_API_KEY`
   - 昔涟改写功能的 API Key
@@ -357,23 +357,23 @@ nb run --reload
 
 #### 昔涟改写
 
-先引用一段不超过 40 字的话，再发送：
+先引用一段不超过 200 字的话，再发送：
 
 ```text
 @机器人 /昔涟改写
 ```
 
-机器人会返回一段不超过 80 字的昔涟口吻改写语句。
+机器人会返回一段不超过 200 字的昔涟口吻改写语句。
 
 #### 昔涟回复
 
-先引用一段不超过 40 字的话，再发送：
+先引用一段不超过 200 字的话，再发送：
 
 ```text
 @机器人 /昔涟回复
 ```
 
-机器人会返回一段不超过 80 字的昔涟口吻回复语句。
+机器人会返回一段不超过 200 字的昔涟口吻回复语句。
 
 #### 输出约束
 
@@ -386,11 +386,11 @@ nb run --reload
 #### 调用限制
 
 - 昔涟模式未开启时，`/昔涟改写` 和 `/昔涟回复` 不会生效
-- 1 分钟内最多允许 3 次请求
-- 从第 4 次开始会回复：
+- 昔涟接口当前不再额外做 1 分钟次数限流
+- 如果接口配置错误、模型不可用或上游返回异常，会回复：
 
 ```text
-1 分钟内调用次数过多，暂时关闭 api 接口
+昔涟改写服务暂时不可用，请稍后再试。
 ```
 
 ### 7.5 谐音盒规则
@@ -563,7 +563,7 @@ hello world
 @机器人 /开启昔涟模式
 ```
 
-14. 引用一句不超过 40 字的话并测试：
+14. 引用一句不超过 200 字的话并测试：
 
 ```text
 @机器人 /昔涟改写

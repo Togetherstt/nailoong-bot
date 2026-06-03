@@ -3,8 +3,6 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-import time
-from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -54,35 +52,6 @@ class XiLianModeStore:
         await asyncio.to_thread(self.state_path.write_text, payload, "utf-8")
 
 
-class RollingWindowLimiter:
-    def __init__(self, limit: int, window_seconds: float) -> None:
-        self.limit = limit
-        self.window_seconds = window_seconds
-        self._timestamps: deque[float] = deque()
-        self._lock = asyncio.Lock()
-
-    async def allow(self, now: Optional[float] = None) -> bool:
-        async with self._lock:
-            return self.allow_sync(now=now)
-
-    def allow_sync(self, now: Optional[float] = None) -> bool:
-        current = time.monotonic() if now is None else now
-        self.prune_sync(now=current)
-        if len(self._timestamps) >= self.limit:
-            return False
-        self._timestamps.append(current)
-        return True
-
-    def prune_sync(self, now: Optional[float] = None) -> None:
-        current = time.monotonic() if now is None else now
-        while self._timestamps and current - self._timestamps[0] >= self.window_seconds:
-            self._timestamps.popleft()
-
-    def size(self, now: Optional[float] = None) -> int:
-        self.prune_sync(now=now)
-        return len(self._timestamps)
-
-
 def extract_command(plain_text: str) -> tuple[str, Optional[str]]:
     content = plain_text.strip()
     if not content:
@@ -97,7 +66,7 @@ def normalize_quoted_text(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
-def is_valid_quoted_text(text: str, max_chars: int = 40) -> bool:
+def is_valid_quoted_text(text: str, max_chars: int = 200) -> bool:
     normalized = normalize_quoted_text(text)
     if not normalized:
         return False
@@ -117,7 +86,7 @@ def build_system_prompt(task: str) -> str:
         "多使用“爱、希望、故事、美好、浪漫、种子、花朵、黎明、明天、天空”等意象，"
         "自称尽量使用“人家”，语气轻柔，允许少量比喻与排比，但不要过度堆砌。"
         f"{task_line}"
-        "输出必须是简体中文，且不超过80个字符。"
+        "输出必须是简体中文，且不超过200个字符。"
         f"可适度穿插 U+266A（{MUSICAL_NOTE}），但不要过于频繁。"
         f"全文最后必须以且只能以单个 {MUSICAL_NOTE} 结尾，"
         f"不能使用🎵、♫、♬、♩等替代符号。"
@@ -132,11 +101,15 @@ def build_user_prompt(task: str, quoted_text: str) -> str:
     return f"请以昔涟口吻回复这句话：{quoted_text}"
 
 
-def sanitize_xilian_output(text: str, max_chars: int = 80) -> str:
+def sanitize_xilian_output(text: str, max_chars: int = 200) -> str:
     normalized = normalize_quoted_text(text)
     for symbol in INVALID_NOTE_VARIANTS:
         normalized = normalized.replace(symbol, MUSICAL_NOTE)
-    normalized = re.sub(rf"{re.escape(MUSICAL_NOTE)}[{re.escape(TRAILING_PUNCTUATION)}]+", MUSICAL_NOTE, normalized)
+    normalized = re.sub(
+        rf"{re.escape(MUSICAL_NOTE)}[{re.escape(TRAILING_PUNCTUATION)}]+",
+        MUSICAL_NOTE,
+        normalized,
+    )
     normalized = normalized.strip()
     normalized = normalized.rstrip(TRAILING_PUNCTUATION)
     normalized = re.sub(rf"{re.escape(MUSICAL_NOTE)}+$", "", normalized).strip()
