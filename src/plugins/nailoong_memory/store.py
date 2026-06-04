@@ -1,15 +1,22 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import random
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
+from io import BytesIO
 from pathlib import Path
 from typing import Any, Literal, Optional
 from uuid import uuid4
 
 from nonebot.adapters.onebot.v11 import Message, MessageSegment
+
+try:
+    from PIL import Image
+except ImportError:  # pragma: no cover - depends on runtime environment
+    Image = None
 
 
 DATA_DIR = Path("data") / "nailoong"
@@ -17,6 +24,7 @@ IMAGE_DIR = DATA_DIR / "images"
 INDEX_PATH = DATA_DIR / "index.json"
 TRASH_DIR = DATA_DIR / "trash"
 DELETED_INDEX_PATH = DATA_DIR / "deleted.json"
+DEDUP_DHASH_THRESHOLD = 2
 
 
 @dataclass(slots=True)
@@ -29,6 +37,11 @@ class NailoongRecord:
     segment_type: Optional[str] = None
     segment_data: Optional[dict[str, Any]] = None
     original_name: Optional[str] = None
+    content_fingerprint: Optional[str] = None
+    image_sha256: Optional[str] = None
+    image_dhash: Optional[str] = None
+    image_width: Optional[int] = None
+    image_height: Optional[int] = None
 
     @property
     def display_name(self) -> str:
@@ -74,8 +87,10 @@ class NailoongStore:
         original_name: Optional[str],
         file_extension: str,
         added_at: Optional[datetime] = None,
-    ) -> NailoongRecord:
+    ) -> tuple[NailoongRecord, bool]:
         timestamp = added_at or datetime.now(timezone.utc).astimezone()
+        image_sha256 = build_sha256(image_bytes)
+        image_dhash, image_width, image_height = build_dhash(image_bytes)
         record = NailoongRecord(
             id=uuid4().hex,
             added_by=added_by,
@@ -83,16 +98,24 @@ class NailoongStore:
             media_kind="local_image",
             image_filename=f"{uuid4().hex}{self._normalize_extension(file_extension)}",
             original_name=self._normalize_name(original_name),
+            image_sha256=image_sha256,
+            image_dhash=image_dhash,
+            image_width=image_width,
+            image_height=image_height,
         )
 
         async with self._lock:
             records = await self._load_records()
+            duplicate = self._find_duplicate_record(records, record)
+            if duplicate is not None:
+                return duplicate, False
+
             await asyncio.to_thread(self.image_dir.mkdir, parents=True, exist_ok=True)
             await asyncio.to_thread(self._record_path(record).write_bytes, image_bytes)
             records.append(record)
             await self._save_records(records)
 
-        return record
+        return record, True
 
     async def add_segment_record(
         self,
@@ -100,9 +123,18 @@ class NailoongStore:
         *,
         added_by: str,
         original_name: Optional[str],
+        image_bytes: Optional[bytes] = None,
         added_at: Optional[datetime] = None,
-    ) -> NailoongRecord:
+    ) -> tuple[NailoongRecord, bool]:
         timestamp = added_at or datetime.now(timezone.utc).astimezone()
+        image_sha256: Optional[str] = None
+        image_dhash: Optional[str] = None
+        image_width: Optional[int] = None
+        image_height: Optional[int] = None
+        if image_bytes is not None:
+            image_sha256 = build_sha256(image_bytes)
+            image_dhash, image_width, image_height = build_dhash(image_bytes)
+
         record = NailoongRecord(
             id=uuid4().hex,
             added_by=added_by,
@@ -111,14 +143,23 @@ class NailoongStore:
             segment_type=segment.type,
             segment_data=dict(segment.data),
             original_name=self._normalize_name(original_name),
+            content_fingerprint=build_segment_fingerprint(segment),
+            image_sha256=image_sha256,
+            image_dhash=image_dhash,
+            image_width=image_width,
+            image_height=image_height,
         )
 
         async with self._lock:
             records = await self._load_records()
+            duplicate = self._find_duplicate_record(records, record)
+            if duplicate is not None:
+                return duplicate, False
+
             records.append(record)
             await self._save_records(records)
 
-        return record
+        return record, True
 
     async def random_record(self) -> Optional[NailoongRecord]:
         async with self._lock:
@@ -203,6 +244,7 @@ class NailoongStore:
             return []
 
         records: list[NailoongRecord] = []
+        migrated = False
         for item in payload:
             if not isinstance(item, dict):
                 continue
@@ -210,8 +252,12 @@ class NailoongStore:
                 record = NailoongRecord(**item)
             except TypeError:
                 continue
+            if self._backfill_record_fingerprints(record):
+                migrated = True
             if self._record_exists(record):
                 records.append(record)
+        if migrated:
+            await self._save_records(records)
         return records
 
     async def _save_records(self, records: list[NailoongRecord]) -> None:
@@ -265,6 +311,83 @@ class NailoongStore:
         if record.media_kind == "segment":
             return bool(record.segment_type and record.segment_data is not None)
         return self._record_path(record).exists()
+
+    def _backfill_record_fingerprints(self, record: NailoongRecord) -> bool:
+        migrated = False
+
+        if record.media_kind == "segment":
+            if (
+                record.content_fingerprint is None
+                and record.segment_type is not None
+                and record.segment_data is not None
+            ):
+                record.content_fingerprint = build_segment_fingerprint(
+                    MessageSegment(record.segment_type, record.segment_data)
+                )
+                migrated = True
+            return migrated
+
+        image_path = self._record_path(record)
+        if not image_path.exists():
+            return migrated
+
+        image_bytes = image_path.read_bytes()
+        if record.image_sha256 is None:
+            record.image_sha256 = build_sha256(image_bytes)
+            migrated = True
+        if (
+            record.image_dhash is None
+            or record.image_width is None
+            or record.image_height is None
+        ):
+            image_dhash, image_width, image_height = build_dhash(image_bytes)
+            if image_dhash is not None and image_width is not None and image_height is not None:
+                record.image_dhash = image_dhash
+                record.image_width = image_width
+                record.image_height = image_height
+                migrated = True
+
+        return migrated
+
+    def _find_duplicate_record(
+        self,
+        records: list[NailoongRecord],
+        candidate: NailoongRecord,
+    ) -> Optional[NailoongRecord]:
+        for record in records:
+            if self._is_duplicate_record(record, candidate):
+                return record
+        return None
+
+    def _is_duplicate_record(
+        self,
+        existing: NailoongRecord,
+        candidate: NailoongRecord,
+    ) -> bool:
+        if (
+            existing.content_fingerprint
+            and candidate.content_fingerprint
+            and existing.content_fingerprint == candidate.content_fingerprint
+        ):
+            return True
+
+        if existing.image_sha256 and candidate.image_sha256 and existing.image_sha256 == candidate.image_sha256:
+            return True
+
+        if (
+            existing.image_dhash
+            and candidate.image_dhash
+            and existing.image_width is not None
+            and existing.image_height is not None
+            and candidate.image_width is not None
+            and candidate.image_height is not None
+            and existing.image_width == candidate.image_width
+            and existing.image_height == candidate.image_height
+            and hamming_distance(existing.image_dhash, candidate.image_dhash) <= DEDUP_DHASH_THRESHOLD
+        ):
+            return True
+
+        return False
 
     async def _archive_deleted_record(self, record: NailoongRecord) -> None:
         deleted_records = await self._load_deleted_records()
@@ -340,6 +463,16 @@ def find_storable_segment(reply_message: Message) -> Optional[MessageSegment]:
     return None
 
 
+def find_segment_image_url(segment: MessageSegment) -> Optional[str]:
+    if segment.type not in {"image", "mface", "marketface"}:
+        return None
+    for key in ("url", "file"):
+        value = segment.data.get(key)
+        if isinstance(value, str) and value.startswith(("http://", "https://")):
+            return value
+    return None
+
+
 def guess_extension_from_url(url: str) -> str:
     normalized = url.split("?", 1)[0].rsplit("/", 1)[-1].lower()
     if "." not in normalized:
@@ -357,3 +490,51 @@ def format_record_line(index: int, record: NailoongRecord) -> str:
         f"{index}. {record.display_name} | {media_label} | "
         f"添加者:{record.added_by} | 日期:{record.added_at}"
     )
+
+
+def build_sha256(content: bytes) -> str:
+    return hashlib.sha256(content).hexdigest()
+
+
+def build_dhash(content: bytes) -> tuple[Optional[str], Optional[int], Optional[int]]:
+    if Image is None:
+        return None, None, None
+
+    with Image.open(BytesIO(content)) as image:
+        width, height = image.size
+        grayscale = image.convert("L").resize((9, 8))
+        pixels = list(grayscale.getdata())
+
+    bits = []
+    for row in range(8):
+        for col in range(8):
+            left = pixels[row * 9 + col]
+            right = pixels[row * 9 + col + 1]
+            bits.append("1" if left > right else "0")
+    value = f"{int(''.join(bits), 2):016x}"
+    return value, width, height
+
+
+def hamming_distance(left: str, right: str) -> int:
+    return sum(ch1 != ch2 for ch1, ch2 in zip(left, right)) + abs(len(left) - len(right))
+
+
+def build_segment_fingerprint(segment: MessageSegment) -> str:
+    payload = {
+        "type": segment.type,
+        "data": _normalize_json_value(dict(segment.data)),
+    }
+    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _normalize_json_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {str(key): _normalize_json_value(inner) for key, inner in sorted(value.items())}
+    if isinstance(value, list):
+        return [_normalize_json_value(item) for item in value]
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, (int, float, bool)) or value is None:
+        return value
+    return str(value)

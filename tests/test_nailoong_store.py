@@ -1,18 +1,26 @@
 import json
 import tempfile
 import unittest
+from io import BytesIO
 from pathlib import Path
 
 from nonebot.adapters.onebot.v11 import Message
+from PIL import Image
 
 from src.plugins.nailoong_memory.store import (
+    NailoongRecord,
     NailoongStore,
+    build_dhash,
     build_record_dict,
+    build_segment_fingerprint,
+    build_sha256,
     extract_command_name,
     find_image_url,
+    find_segment_image_url,
     find_storable_segment,
     format_record_line,
     guess_extension_from_url,
+    hamming_distance,
 )
 
 
@@ -31,28 +39,99 @@ class NailoongStoreTestCase(unittest.IsolatedAsyncioTestCase):
         self.temp_dir.cleanup()
 
     async def test_add_record_persists_metadata_and_image(self) -> None:
-        record = await self.store.add_record(
-            b"fake-image",
+        record, created = await self.store.add_record(
+            _build_png_bytes("red"),
             added_by="123456",
             original_name="开心奶龙",
             file_extension=".png",
         )
 
+        self.assertTrue(created)
         self.assertEqual(record.display_name, "开心奶龙")
         self.assertTrue(self.store.message_for_record(record))
         self.assertTrue((self.base_path / "images" / record.image_filename).exists())
+        self.assertIsNotNone(record.image_sha256)
+        self.assertIsNotNone(record.image_dhash)
 
         payload = json.loads(self.store.index_path.read_text("utf-8"))
         self.assertEqual(len(payload), 1)
         self.assertEqual(payload[0]["added_by"], "123456")
         self.assertEqual(payload[0]["original_name"], "开心奶龙")
 
+    async def test_add_record_deduplicates_by_sha256(self) -> None:
+        first, created_first = await self.store.add_record(
+            _build_png_bytes("red"),
+            added_by="1",
+            original_name="奶龙一号",
+            file_extension=".png",
+        )
+        second, created_second = await self.store.add_record(
+            _build_png_bytes("red"),
+            added_by="2",
+            original_name="奶龙二号",
+            file_extension=".png",
+        )
+
+        self.assertTrue(created_first)
+        self.assertFalse(created_second)
+        self.assertEqual(first.id, second.id)
+        self.assertEqual(await self.store.count(), 1)
+
+    async def test_add_record_deduplicates_by_dhash_when_encoding_differs(self) -> None:
+        first, created_first = await self.store.add_record(
+            _build_png_bytes("blue"),
+            added_by="1",
+            original_name="蓝龙",
+            file_extension=".png",
+        )
+        second, created_second = await self.store.add_record(
+            _build_bmp_bytes("blue"),
+            added_by="2",
+            original_name="蓝龙复制",
+            file_extension=".bmp",
+        )
+
+        self.assertTrue(created_first)
+        self.assertFalse(created_second)
+        self.assertEqual(first.id, second.id)
+        self.assertEqual(await self.store.count(), 1)
+
+    async def test_add_record_deduplicates_against_legacy_record_without_hash_fields(self) -> None:
+        legacy_record = {
+            "id": "legacy-red",
+            "added_by": "10001",
+            "added_at": "2026-06-04 01:40:00",
+            "media_kind": "local_image",
+            "image_filename": "legacy-red.png",
+            "segment_type": None,
+            "segment_data": None,
+            "original_name": "旧奶龙",
+        }
+        image_path = self.base_path / "images" / "legacy-red.png"
+        image_path.parent.mkdir(parents=True, exist_ok=True)
+        image_path.write_bytes(_build_png_bytes("red"))
+        self.store.index_path.write_text(json.dumps([legacy_record], ensure_ascii=False, indent=2), "utf-8")
+
+        record, created = await self.store.add_record(
+            _build_png_bytes("red"),
+            added_by="20002",
+            original_name="新名字奶龙",
+            file_extension=".png",
+        )
+
+        self.assertFalse(created)
+        self.assertEqual(record.id, "legacy-red")
+        payload = json.loads(self.store.index_path.read_text("utf-8"))
+        self.assertEqual(payload[0]["id"], "legacy-red")
+        self.assertIn("image_sha256", payload[0])
+        self.assertIn("image_dhash", payload[0])
+
     async def test_random_record_returns_none_when_empty(self) -> None:
         self.assertIsNone(await self.store.random_record())
 
     async def test_random_record_returns_existing_entry(self) -> None:
         await self.store.add_record(
-            b"img1",
+            _build_png_bytes("yellow"),
             added_by="1",
             original_name=None,
             file_extension=".jpg",
@@ -66,21 +145,42 @@ class NailoongStoreTestCase(unittest.IsolatedAsyncioTestCase):
         segment = find_storable_segment(Message("[CQ:face,id=123]"))
         assert segment is not None
 
-        record = await self.store.add_segment_record(
+        record, created = await self.store.add_segment_record(
             segment,
             added_by="8888",
             original_name="奶龙表情",
         )
 
+        self.assertTrue(created)
         self.assertEqual(record.media_kind, "segment")
         self.assertEqual(record.segment_type, "face")
+        self.assertIsNotNone(record.content_fingerprint)
         payload = json.loads(self.store.index_path.read_text("utf-8"))
         self.assertEqual(payload[0]["segment_type"], "face")
         self.assertEqual(payload[0]["segment_data"]["id"], "123")
 
+    async def test_add_segment_record_deduplicates_same_segment(self) -> None:
+        segment = find_storable_segment(Message("[CQ:face,id=456]"))
+        assert segment is not None
+
+        first, created_first = await self.store.add_segment_record(
+            segment,
+            added_by="1",
+            original_name="表情一",
+        )
+        second, created_second = await self.store.add_segment_record(
+            segment,
+            added_by="2",
+            original_name="表情二",
+        )
+
+        self.assertTrue(created_first)
+        self.assertFalse(created_second)
+        self.assertEqual(first.id, second.id)
+
     async def test_delete_by_index_removes_record_and_file(self) -> None:
-        record = await self.store.add_record(
-            b"img-delete",
+        record, _ = await self.store.add_record(
+            _build_png_bytes("purple"),
             added_by="10001",
             original_name="待删除奶龙",
             file_extension=".png",
@@ -147,8 +247,8 @@ class NailoongStoreTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(deleted.display_name, "第二个")
 
     async def test_undo_last_delete_restores_image_record_and_file(self) -> None:
-        record = await self.store.add_record(
-            b"img-restore",
+        record, _ = await self.store.add_record(
+            _build_png_bytes("orange"),
             added_by="10002",
             original_name="可恢复奶龙",
             file_extension=".png",
@@ -221,6 +321,13 @@ class NailoongHelperTestCase(unittest.TestCase):
         assert segment is not None
         self.assertEqual(segment.type, "mface")
 
+    def test_find_segment_image_url(self) -> None:
+        segment = find_storable_segment(
+            Message("[CQ:mface,summary=奶龙,emoji_id=12345,url=https://example.com/a.png]")
+        )
+        assert segment is not None
+        self.assertEqual(find_segment_image_url(segment), "https://example.com/a.png")
+
     def test_guess_extension_from_url(self) -> None:
         self.assertEqual(
             guess_extension_from_url("https://example.com/foo/bar.gif?x=1"),
@@ -239,10 +346,28 @@ class NailoongHelperTestCase(unittest.TestCase):
         self.assertIn("测试奶龙", line)
         self.assertIn("添加者:42", line)
 
-    @staticmethod
-    def _make_record():
-        from src.plugins.nailoong_memory.store import NailoongRecord
+    def test_build_sha256(self) -> None:
+        self.assertEqual(build_sha256(b"abc"), build_sha256(b"abc"))
+        self.assertNotEqual(build_sha256(b"abc"), build_sha256(b"abcd"))
 
+    def test_build_dhash(self) -> None:
+        image_bytes = _build_png_bytes("red")
+        dhash, width, height = build_dhash(image_bytes)
+        self.assertIsNotNone(dhash)
+        self.assertEqual(width, 16)
+        self.assertEqual(height, 16)
+
+    def test_hamming_distance(self) -> None:
+        self.assertEqual(hamming_distance("ff", "ff"), 0)
+        self.assertEqual(hamming_distance("0f", "00"), 1)
+
+    def test_build_segment_fingerprint(self) -> None:
+        segment = find_storable_segment(Message("[CQ:face,id=123]"))
+        assert segment is not None
+        self.assertEqual(build_segment_fingerprint(segment), build_segment_fingerprint(segment))
+
+    @staticmethod
+    def _make_record() -> NailoongRecord:
         return NailoongRecord(
             id="abc",
             image_filename="abc.png",
@@ -250,3 +375,18 @@ class NailoongHelperTestCase(unittest.TestCase):
             added_at="2026-06-03 02:31:00",
             original_name="测试奶龙",
         )
+
+
+def _build_png_bytes(color: str) -> bytes:
+    return _build_image_bytes(color, "PNG")
+
+
+def _build_bmp_bytes(color: str) -> bytes:
+    return _build_image_bytes(color, "BMP")
+
+
+def _build_image_bytes(color: str, image_format: str) -> bytes:
+    image = Image.new("RGB", (16, 16), color=color)
+    buffer = BytesIO()
+    image.save(buffer, format=image_format)
+    return buffer.getvalue()

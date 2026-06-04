@@ -11,10 +11,12 @@ from .store import (
     NailoongStore,
     extract_command_name,
     find_image_url,
+    find_segment_image_url,
     find_storable_segment,
     format_record_line,
     guess_extension_from_url,
 )
+
 
 store = NailoongStore()
 nailoong_message = on_message(rule=to_me(), priority=10, block=False)
@@ -30,12 +32,7 @@ async def handle_nailoong_message(bot: Bot, event: MessageEvent) -> None:
         "/奶龙列表",
         "/删除奶龙",
         "/撤销删除奶龙",
-        "/奶龙",
     }:
-        return
-
-    if command == "/奶龙":
-        await _handle_help(bot, event, argument)
         return
 
     if command == "/添加奶龙":
@@ -101,17 +98,25 @@ async def _handle_add_nailoong(
                 )
                 return
             image_bytes = await _download_image(image_url)
-            record = await store.add_record(
+            record, created = await store.add_record(
                 image_bytes,
                 added_by=str(event.user_id),
                 original_name=argument,
                 file_extension=guess_extension_from_url(image_url),
             )
         else:
-            record = await store.add_segment_record(
+            segment_image_bytes: Optional[bytes] = None
+            segment_image_url = find_segment_image_url(segment)
+            if segment_image_url is not None:
+                try:
+                    segment_image_bytes = await _download_image(segment_image_url)
+                except httpx.HTTPError:
+                    logger.warning("Failed to download comparable bytes for segment dedup.")
+            record, created = await store.add_segment_record(
                 segment,
                 added_by=str(event.user_id),
                 original_name=argument,
+                image_bytes=segment_image_bytes,
             )
     except httpx.HTTPError:
         logger.exception("Failed to download nailoong image from reply message")
@@ -131,10 +136,24 @@ async def _handle_add_nailoong(
         return
 
     total = await store.count()
+    if created:
+        await bot.send(
+            event,
+            (
+                f"已添加奶龙表情包：{record.display_name}\n"
+                f"添加者 QQ：{record.added_by}\n"
+                f"添加日期：{record.added_at}\n"
+                f"当前库存：{total}"
+            ),
+            reply_message=True,
+        )
+        return
+
     await bot.send(
         event,
         (
-            f"已添加奶龙表情包：{record.display_name}\n"
+            f"这张奶龙已经存在，无需重复添加。\n"
+            f"奶龙名称：{record.display_name}\n"
             f"添加者 QQ：{record.added_by}\n"
             f"添加日期：{record.added_at}\n"
             f"当前库存：{total}"
@@ -246,7 +265,7 @@ async def _handle_help(bot: Bot, event: MessageEvent, argument: Optional[str]) -
             "4. 管理员可发送 `@机器人 /删除奶龙 序号`、`@机器人 /删除奶龙 名称` 或 `@机器人 /删除奶龙 最近一个` 删除记录。\n"
             "5. 管理员可发送 `@机器人 /撤销删除奶龙` 恢复最近一次删除。\n"
             "6. 发送 `/奶龙 help` 查看本帮助。\n"
-            "说明：只有 `/奶龙 help` 不需要 @机器人，其他奶龙命令仍然需要。"
+            "说明：奶龙上传已启用 `sha256 + dHash` 双层去重；只有 `/奶龙 help` 不需要 @机器人，其他奶龙命令仍然需要。"
         ),
         reply_message=True,
     )
