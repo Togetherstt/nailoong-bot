@@ -27,6 +27,7 @@ TYPE_LABELS = {
 
 SOURCE_LABELS = {
     "defect": "故障机器人",
+    "机器人": "故障机器人",
     "故障机器人": "故障机器人",
     "silent": "静默猎手",
     "静默猎手": "静默猎手",
@@ -34,17 +35,19 @@ SOURCE_LABELS = {
     "铁甲战士": "铁血战士",
     "铁血战士": "铁血战士",
     "regent": "储君",
+    "继承者": "储君",
     "储君": "储君",
     "necrobinder": "亡灵契约师",
+    "死亡缚者": "亡灵契约师",
     "亡灵契约师": "亡灵契约师",
-}
-
-ALLOWED_SOURCES = {
-    "故障机器人",
-    "静默猎手",
-    "铁血战士",
-    "储君",
-    "亡灵契约师",
+    "colorless": "无色",
+    "无色": "无色",
+    "event": "其他",
+    "curse": "其他",
+    "status": "其他",
+    "other": "其他",
+    "其它": "其他",
+    "其他": "其他",
 }
 
 
@@ -119,7 +122,7 @@ class GuessGameState:
                     "猜卡提示升级：\n"
                     f"新增提示：{self.delayed_hint.label}：{self.delayed_hint.value}\n"
                     f"{self.render_board()}\n"
-                    "20 秒后若仍无人猜中，将开始揭示描述中的隐藏文字。"
+                    "60 秒后若仍无人猜中，将开始揭示描述中的隐藏文字。"
                 )
             )
 
@@ -146,7 +149,7 @@ class GuessGameState:
             message=(
                 f"提示阶段 {self.reveal_round}：已额外揭示部分描述文字。\n"
                 f"{self.render_board()}\n"
-                "20 秒后若仍无人猜中，将继续揭示下一批隐藏文字。"
+                "60 秒后若仍无人猜中，将继续揭示下一批隐藏文字。"
             )
         )
 
@@ -202,21 +205,19 @@ def load_cards_from_dir(data_dir: Path) -> list[CardRecord]:
             payload.get("card_type") or payload.get("type") or payload.get("type_zh")
         )
         default_source = _normalize_source_label(
-            payload.get("source_pool")
-            or payload.get("character")
-            or payload.get("character_zh")
-            or payload.get("pool")
+            payload.get("source_pool"),
+            character_zh=payload.get("character_zh"),
+            pool=payload.get("pool"),
+            character=payload.get("character"),
         )
         for item in payload.get("cards", []):
             source_label = _normalize_source_label(
-                item.get("character_zh")
-                or item.get("pool")
-                or item.get("character")
-                or payload.get("source_pool")
-                or default_source
+                payload.get("source_pool"),
+                character_zh=item.get("character_zh"),
+                pool=item.get("pool"),
+                character=item.get("character"),
+                fallback=default_source,
             )
-            if source_label not in ALLOWED_SOURCES:
-                continue
 
             type_label = _normalize_type_label(
                 item.get("type_zh") or item.get("type") or payload.get("card_type") or default_type
@@ -295,9 +296,9 @@ def build_help_message() -> str:
     return (
         "猜卡功能用法：\n"
         "1. `@机器人 /猜卡`：在当前群开始一局杀戮尖塔猜卡。\n"
-        "2. 开局会给出 3 条基础提示，10 秒后补第 4 条，之后每 20 秒按初始隐藏字总数的 25% 揭示一批描述文字，共揭示 4 批。\n"
+        "2. 开局会给出 3 条基础提示，10 秒后补第 4 条，之后每 60 秒按初始隐藏字总数的 25% 揭示一批描述文字，共揭示 4 批。\n"
         "3. 猜测格式：`@机器人 卡牌完整名称`。\n"
-        "4. `@机器人 /提示`：立即跳到下一阶段提示，并将计时重置为 20 秒。\n"
+        "4. `@机器人 /提示`：立即跳到下一阶段提示，并将计时重置为 60 秒。\n"
         "5. `@机器人 /结束猜卡`：直接结束当前群的这一局。\n"
         "6. `@机器人 /猜卡测试 卡牌名或ID`：管理员指定卡牌开测试局，方便排查与验收。\n"
         "7. `/猜卡 help`：查看本帮助。\n"
@@ -369,10 +370,43 @@ def _normalize_type_label(value: object) -> Optional[str]:
     return TYPE_LABELS.get(str(value).strip())
 
 
-def _normalize_source_label(value: object) -> Optional[str]:
+def _normalize_source_label(
+    value: object,
+    *,
+    character_zh: object = None,
+    pool: object = None,
+    character: object = None,
+    fallback: Optional[str] = None,
+) -> str:
+    source_pool = _normalize_source_token(value)
+    if source_pool == "colorless":
+        return "无色"
+    if source_pool in {"event", "curse", "status"}:
+        return "其他"
+
+    for candidate in (character_zh, pool, character, value):
+        normalized = _map_source_candidate(candidate)
+        if normalized is not None:
+            return normalized
+
+    return fallback or "其他"
+
+
+def _normalize_source_token(value: object) -> Optional[str]:
     if value is None:
         return None
     text = str(value).strip()
+    if not text:
+        return None
+    return text.casefold()
+
+
+def _map_source_candidate(value: object) -> Optional[str]:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
     normalized = SOURCE_LABELS.get(text.casefold())
     if normalized is not None:
         return normalized

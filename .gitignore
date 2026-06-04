@@ -21,3 +21,5 @@ data/nailoong/trash/
 dist/
 build/
 *.egg-info/
+
+.last_deploy_commit

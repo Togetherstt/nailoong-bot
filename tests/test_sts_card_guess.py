@@ -29,6 +29,10 @@ class StsCardGuessRepositoryTestCase(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         root = Path(self.temp_dir.name)
         (root / "attack").mkdir()
+        (root / "skill").mkdir()
+        (root / "power").mkdir()
+        (root / "curse").mkdir()
+        (root / "status").mkdir()
         payload = {
             "card_type": "attack",
             "source_pool": "ironclad",
@@ -55,6 +59,126 @@ class StsCardGuessRepositoryTestCase(unittest.TestCase):
             json.dumps(payload, ensure_ascii=False),
             encoding="utf-8",
         )
+        (root / "attack" / "defect.json").write_text(
+            json.dumps(
+                {
+                    "card_type": "attack",
+                    "source_pool": "defect",
+                    "cards": [
+                        {
+                            "id": "zap",
+                            "name": "电击",
+                            "description": "造成7点伤害。",
+                            "cost": "1",
+                            "character_zh": "机器人",
+                            "type_zh": "攻击",
+                        }
+                    ],
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        (root / "skill" / "regent.json").write_text(
+            json.dumps(
+                {
+                    "card_type": "skill",
+                    "source_pool": "regent",
+                    "cards": [
+                        {
+                            "id": "inheritance",
+                            "name": "继承",
+                            "description": "获得1点格挡。",
+                            "cost": "1",
+                            "character_zh": "继承者",
+                            "type_zh": "技能",
+                        }
+                    ],
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        (root / "power" / "necrobinder.json").write_text(
+            json.dumps(
+                {
+                    "card_type": "power",
+                    "source_pool": "necrobinder",
+                    "cards": [
+                        {
+                            "id": "death_bind",
+                            "name": "死缚",
+                            "description": "获得1层力量。",
+                            "cost": "1",
+                            "character_zh": "死亡缚者",
+                            "type_zh": "能力",
+                        }
+                    ],
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        (root / "attack" / "colorless.json").write_text(
+            json.dumps(
+                {
+                    "card_type": "attack",
+                    "source_pool": "colorless",
+                    "cards": [
+                        {
+                            "id": "boulder",
+                            "name": "巨石",
+                            "description": "造成12点伤害。",
+                            "cost": "2",
+                            "character_zh": "无色",
+                            "type_zh": "攻击",
+                        }
+                    ],
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        (root / "curse" / "curse.json").write_text(
+            json.dumps(
+                {
+                    "card_type": "curse",
+                    "source_pool": "curse",
+                    "cards": [
+                        {
+                            "id": "spore_mind",
+                            "name": "孢子心灵",
+                            "description": "无法打出。",
+                            "cost": "0",
+                            "character_zh": "无色",
+                            "type_zh": "诅咒",
+                        }
+                    ],
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        (root / "status" / "status.json").write_text(
+            json.dumps(
+                {
+                    "card_type": "status",
+                    "source_pool": "status",
+                    "cards": [
+                        {
+                            "id": "beckon",
+                            "name": "召引",
+                            "description": "回合结束时消失。",
+                            "cost": "0",
+                            "character_zh": "无色",
+                            "type_zh": "状态",
+                        }
+                    ],
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
         self.root = root
 
     def tearDown(self) -> None:
@@ -62,10 +186,18 @@ class StsCardGuessRepositoryTestCase(unittest.TestCase):
 
     def test_load_cards_from_dir_filters_and_maps(self) -> None:
         cards = load_cards_from_dir(self.root)
-        self.assertEqual(len(cards), 1)
-        self.assertEqual(cards[0].name, "暴走")
-        self.assertEqual(cards[0].type_label, "攻击")
-        self.assertEqual(cards[0].source_label, "铁血战士")
+        self.assertEqual(len(cards), 8)
+        source_by_name = {card.name: card.source_label for card in cards}
+        type_by_name = {card.name: card.type_label for card in cards}
+        self.assertEqual(source_by_name["暴走"], "铁血战士")
+        self.assertEqual(type_by_name["暴走"], "攻击")
+        self.assertEqual(source_by_name["路人牌"], "铁血战士")
+        self.assertEqual(source_by_name["电击"], "故障机器人")
+        self.assertEqual(source_by_name["继承"], "储君")
+        self.assertEqual(source_by_name["死缚"], "亡灵契约师")
+        self.assertEqual(source_by_name["巨石"], "无色")
+        self.assertEqual(source_by_name["孢子心灵"], "其他")
+        self.assertEqual(source_by_name["召引"], "其他")
 
     def test_repository_find_card_by_name_and_id(self) -> None:
         repository = CardRepository(self.root)

@@ -24,6 +24,8 @@ card_guess_help_message = on_message(priority=10, block=False)
 repository = CardRepository()
 session_lock = asyncio.Lock()
 active_sessions: dict[str, "CardGuessSession"] = {}
+INITIAL_HINT_DELAY_SECONDS = 10.0
+FOLLOWUP_HINT_DELAY_SECONDS = 60.0
 
 
 @dataclass
@@ -164,7 +166,9 @@ async def _start_session(
         state = create_game_state(card, rng=random.Random())
         session = CardGuessSession(group_id=group_key, bot=bot, state=state)
         active_sessions[group_key] = session
-        session.timer_task = asyncio.create_task(_hint_after_delay(group_key, 10.0))
+        session.timer_task = asyncio.create_task(
+            _hint_after_delay(group_key, INITIAL_HINT_DELAY_SECONDS)
+        )
 
     prefix = "猜卡测试开始：\n" if testing else ""
     await bot.send(event, prefix + state.build_start_message(), reply_message=True)
@@ -184,7 +188,10 @@ async def _handle_end_game(bot: Bot, event: GroupMessageEvent) -> None:
 
 
 async def _handle_manual_hint(bot: Bot, event: GroupMessageEvent) -> None:
-    result = await _advance_group_session(str(event.group_id), next_delay=20.0)
+    result = await _advance_group_session(
+        str(event.group_id),
+        next_delay=FOLLOWUP_HINT_DELAY_SECONDS,
+    )
     if result is None:
         await bot.send(event, "本群当前没有正在进行的猜卡游戏。", reply_message=True)
         return
@@ -220,7 +227,10 @@ async def _handle_guess_attempt(bot: Bot, event: GroupMessageEvent, guess_text: 
 async def _hint_after_delay(group_key: str, delay: float) -> None:
     try:
         await asyncio.sleep(delay)
-        result = await _advance_group_session(group_key, next_delay=20.0)
+        result = await _advance_group_session(
+            group_key,
+            next_delay=FOLLOWUP_HINT_DELAY_SECONDS,
+        )
         if result is None:
             return
         await _send_group_text(result.bot, result.group_id, result.message)
