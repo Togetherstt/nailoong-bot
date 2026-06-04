@@ -1,0 +1,125 @@
+﻿{
+    "schema_version":  1,
+    "generated_at":  "2026-06-02T20:38:35",
+    "source":  {
+                   "english_json":  "https://sts2.wiki/cards/data.json",
+                   "chinese_pages":  "https://www.sts2-wiki.com/zh/cards/{CARD_ID}"
+               },
+    "total_cards":  566,
+    "chinese_page_hits":  541,
+    "chinese_page_fallbacks":  25,
+    "counts_by_type":  {
+                           "attack":  195,
+                           "skill":  225,
+                           "power":  110,
+                           "curse":  18,
+                           "status":  15,
+                           "quest":  3
+                       },
+    "files":  [
+                  {
+                      "path":  "src\\cards\\attack\\colorless.json",
+                      "size":  34712
+                  },
+                  {
+                      "path":  "src\\cards\\attack\\defect.json",
+                      "size":  43593
+                  },
+                  {
+                      "path":  "src\\cards\\attack\\event.json",
+                      "size":  9868
+                  },
+                  {
+                      "path":  "src\\cards\\attack\\ironclad.json",
+                      "size":  55485
+                  },
+                  {
+                      "path":  "src\\cards\\attack\\necrobinder.json",
+                      "size":  52135
+                  },
+                  {
+                      "path":  "src\\cards\\attack\\regent.json",
+                      "size":  48727
+                  },
+                  {
+                      "path":  "src\\cards\\attack\\silent.json",
+                      "size":  40023
+                  },
+                  {
+                      "path":  "src\\cards\\curse\\curse.json",
+                      "size":  23301
+                  },
+                  {
+                      "path":  "src\\cards\\index.json",
+                      "size":  5695
+                  },
+                  {
+                      "path":  "src\\cards\\power\\colorless.json",
+                      "size":  18934
+                  },
+                  {
+                      "path":  "src\\cards\\power\\defect.json",
+                      "size":  29015
+                  },
+                  {
+                      "path":  "src\\cards\\power\\ironclad.json",
+                      "size":  30564
+                  },
+                  {
+                      "path":  "src\\cards\\power\\necrobinder.json",
+                      "size":  26767
+                  },
+                  {
+                      "path":  "src\\cards\\power\\regent.json",
+                      "size":  27536
+                  },
+                  {
+                      "path":  "src\\cards\\power\\silent.json",
+                      "size":  27395
+                  },
+                  {
+                      "path":  "src\\cards\\quest\\colorless.json",
+                      "size":  4150
+                  },
+                  {
+                      "path":  "src\\cards\\README.md",
+                      "size":  513
+                  },
+                  {
+                      "path":  "src\\cards\\skill\\colorless.json",
+                      "size":  52572
+                  },
+                  {
+                      "path":  "src\\cards\\skill\\defect.json",
+                      "size":  54508
+                  },
+                  {
+                      "path":  "src\\cards\\skill\\event.json",
+                      "size":  13250
+                  },
+                  {
+                      "path":  "src\\cards\\skill\\ironclad.json",
+                      "size":  39917
+                  },
+                  {
+                      "path":  "src\\cards\\skill\\necrobinder.json",
+                      "size":  49657
+                  },
+                  {
+                      "path":  "src\\cards\\skill\\regent.json",
+                      "size":  51031
+                  },
+                  {
+                      "path":  "src\\cards\\skill\\silent.json",
+                      "size":  57486
+                  },
+                  {
+                      "path":  "src\\cards\\status\\colorless.json",
+                      "size":  5263
+                  },
+                  {
+                      "path":  "src\\cards\\status\\status.json",
+                      "size":  14175
+                  }
+              ]
+}

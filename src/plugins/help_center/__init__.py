@@ -22,7 +22,8 @@ async def handle_help_message(bot: Bot, event: MessageEvent) -> None:
             "`/盒 help`：查看盒功能帮助。\n"
             "`/昔涟 help`：查看昔涟功能帮助。\n"
             "`/笑话 help`：查看笑话功能帮助。\n"
-            "说明：总 `/help` 需要 @机器人，以上四个分支帮助不需要。"
+            "`/猜卡 help`：查看杀戮尖塔猜卡帮助。\n"
+            "说明：总 `/help` 需要 @机器人，以上五个分支帮助不需要。"
         ),
         reply_message=True,
     )
