@@ -4,8 +4,10 @@ import asyncio
 import hashlib
 import json
 import random
+import re
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
+from difflib import SequenceMatcher
 from io import BytesIO
 from pathlib import Path
 from typing import Any, Literal, Optional
@@ -24,6 +26,7 @@ IMAGE_DIR = DATA_DIR / "images"
 INDEX_PATH = DATA_DIR / "index.json"
 TRASH_DIR = DATA_DIR / "trash"
 DELETED_INDEX_PATH = DATA_DIR / "deleted.json"
+SETTINGS_PATH = DATA_DIR / "settings.json"
 DEDUP_DHASH_THRESHOLD = 2
 
 
@@ -72,11 +75,13 @@ class NailoongStore:
         image_dir: Path = IMAGE_DIR,
         trash_dir: Path = TRASH_DIR,
         deleted_index_path: Path = DELETED_INDEX_PATH,
+        settings_path: Path = SETTINGS_PATH,
     ) -> None:
         self.index_path = index_path
         self.image_dir = image_dir
         self.trash_dir = trash_dir
         self.deleted_index_path = deleted_index_path
+        self.settings_path = settings_path
         self._lock = asyncio.Lock()
 
     async def add_record(
@@ -173,10 +178,61 @@ class NailoongStore:
             records = await self._load_records()
         return len(records)
 
+    async def find_by_index(self, index: int) -> Optional[NailoongRecord]:
+        async with self._lock:
+            records = await self._load_records()
+        if index < 1 or index > len(records):
+            return None
+        return records[index - 1]
+
+    async def fuzzy_find_by_name(self, query: str) -> Optional[tuple[int, NailoongRecord]]:
+        normalized_query = normalize_search_text(query)
+        if not normalized_query:
+            return None
+
+        async with self._lock:
+            records = await self._load_records()
+
+        best_match: Optional[tuple[int, NailoongRecord]] = None
+        best_score = -1.0
+        for index, record in enumerate(records, start=1):
+            score = _score_name_match(normalized_query, record.display_name)
+            if score > best_score:
+                best_score = score
+                best_match = (index, record)
+            elif score == best_score and best_match is not None and index < best_match[0]:
+                best_match = (index, record)
+        return best_match
+
     async def list_records(self) -> list[NailoongRecord]:
         async with self._lock:
             records = await self._load_records()
         return records
+
+    async def is_forward_mode_enabled(self, group_id: str) -> bool:
+        normalized_group_id = str(group_id).strip()
+        if not normalized_group_id:
+            return False
+        async with self._lock:
+            settings = await self._load_settings()
+        return normalized_group_id in settings["forward_group_ids"]
+
+    async def set_forward_mode(self, group_id: str, enabled: bool) -> bool:
+        normalized_group_id = str(group_id).strip()
+        if not normalized_group_id:
+            return False
+
+        async with self._lock:
+            settings = await self._load_settings()
+            groups = set(settings["forward_group_ids"])
+            before = normalized_group_id in groups
+            if enabled:
+                groups.add(normalized_group_id)
+            else:
+                groups.discard(normalized_group_id)
+            settings["forward_group_ids"] = sorted(groups)
+            await self._save_settings(settings)
+        return before != enabled
 
     async def delete_by_index(self, index: int) -> Optional[NailoongRecord]:
         async with self._lock:
@@ -300,6 +356,34 @@ class NailoongStore:
             indent=2,
         )
         await asyncio.to_thread(self.deleted_index_path.write_text, payload, "utf-8")
+
+    async def _load_settings(self) -> dict[str, list[str]]:
+        if not self.settings_path.exists():
+            return {"forward_group_ids": []}
+
+        raw = await asyncio.to_thread(self.settings_path.read_text, "utf-8")
+        if not raw.strip():
+            return {"forward_group_ids": []}
+
+        payload = json.loads(raw)
+        if not isinstance(payload, dict):
+            return {"forward_group_ids": []}
+
+        raw_group_ids = payload.get("forward_group_ids", [])
+        if not isinstance(raw_group_ids, list):
+            return {"forward_group_ids": []}
+
+        forward_group_ids = []
+        for item in raw_group_ids:
+            text = str(item).strip()
+            if text:
+                forward_group_ids.append(text)
+        return {"forward_group_ids": sorted(set(forward_group_ids))}
+
+    async def _save_settings(self, settings: dict[str, list[str]]) -> None:
+        await asyncio.to_thread(self.settings_path.parent.mkdir, parents=True, exist_ok=True)
+        payload = json.dumps(settings, ensure_ascii=False, indent=2, sort_keys=True)
+        await asyncio.to_thread(self.settings_path.write_text, payload, "utf-8")
 
     def message_for_record(self, record: NailoongRecord) -> Message:
         return record.to_message(self.image_dir)
@@ -538,3 +622,18 @@ def _normalize_json_value(value: Any) -> Any:
     if isinstance(value, (int, float, bool)) or value is None:
         return value
     return str(value)
+
+
+def normalize_search_text(text: str) -> str:
+    return re.sub(r"\s+", "", str(text or "")).strip().lower()
+
+
+def _score_name_match(query: str, target_name: str) -> float:
+    normalized_target = normalize_search_text(target_name)
+    if not normalized_target:
+        return 0.0
+    if query == normalized_target:
+        return 2.0
+    if query in normalized_target:
+        return 1.5 + len(query) / max(len(normalized_target), 1)
+    return SequenceMatcher(None, query, normalized_target).ratio()

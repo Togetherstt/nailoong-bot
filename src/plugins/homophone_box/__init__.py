@@ -7,7 +7,8 @@ from typing import Optional
 from nonebot import get_driver, on_message
 from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, MessageEvent
 from nonebot.rule import to_me
-from src.plugins.utils.group_scope import is_extra_plugin_enabled
+from src.plugins.group_daily_stats.service import record_homophone_usage
+from src.plugins.utils.group_scope import is_extra_plugin_enabled, is_homophone_group_enabled
 
 from .store import (
     HomophoneMatch,
@@ -328,7 +329,7 @@ async def _handle_homophone_box(
     try:
         async with homophone_job_semaphore:
             if _is_quote_in_cooldown(quote_key):
-                await bot.send(event, "已经盒过了。", reply_message=True)
+                await bot.send(event, "已经盒过了", reply_message=True)
                 return
 
             _prune_recent_quote_hits()
@@ -350,6 +351,15 @@ async def _handle_homophone_box(
                 suffix = await _format_bound_member_suffix(bot, event, match)
                 formatted_results.append(f"<{match.candidate}>{suffix}")
 
+            await record_homophone_usage(
+                group_id=str(event.group_id),
+                user_id=str(event.user_id),
+                boxed_member_ids=[
+                    str(match.member_qq)
+                    for match in selected_matches
+                    if match.member_qq is not None
+                ],
+            )
             message = "盒出了：\n" + "\n".join(formatted_results)
             await bot.send(event, message, reply_message=True)
     finally:
@@ -367,7 +377,7 @@ async def _handle_help(bot: Bot, event: MessageEvent) -> None:
             "3. 发送 `@机器人 /绑定群友 首字母 @群友`、`@机器人 /解绑群友 首字母` 管理绑定关系。\n"
             "4. 发送 `@机器人 /首字母列表` 查看当前首字母库。\n"
             "5. 发送 `@机器人 /删除首字母 首字母` 删除指定模式。\n"
-            "6. 引用文本后发送 `@机器人 /谐音盒` 或直接发送 `/盒` 触发匹配。\n"
+            "6. 引用文本后发送 `@机器人 /谐音盒`，或直接发送 `/盒` 触发匹配。\n"
             "7. 发送 `/盒 help` 查看本帮助。\n"
             "说明：只有 `/盒` 和 `/盒 help` 不需要 @机器人，其余管理命令仍然需要。"
         ),
@@ -445,12 +455,7 @@ def _extract_mentioned_member_qq(event: MessageEvent) -> Optional[str]:
 
 
 def _is_homophone_group_allowed(event: MessageEvent) -> bool:
-    allowed_group_ids = _get_allowed_homophone_group_ids()
-    if not allowed_group_ids:
-        return False
-    if not isinstance(event, GroupMessageEvent):
-        return False
-    return str(event.group_id) in allowed_group_ids
+    return is_homophone_group_enabled(event)
 
 
 def _get_allowed_homophone_group_ids() -> set[str]:

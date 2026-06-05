@@ -141,6 +141,54 @@ class NailoongStoreTestCase(unittest.IsolatedAsyncioTestCase):
         assert record is not None
         self.assertEqual(record.added_by, "1")
 
+    async def test_find_by_index_returns_expected_record(self) -> None:
+        await self.store.add_record(
+            _build_png_bytes("yellow"),
+            added_by="1",
+            original_name="第一个奶龙",
+            file_extension=".png",
+        )
+        await self.store.add_record(
+            _build_split_png_bytes("green", "black"),
+            added_by="2",
+            original_name="第二个奶龙",
+            file_extension=".png",
+        )
+
+        record = await self.store.find_by_index(2)
+        self.assertIsNotNone(record)
+        assert record is not None
+        self.assertEqual(record.display_name, "第二个奶龙")
+
+    async def test_fuzzy_find_by_name_prefers_best_match(self) -> None:
+        await self.store.add_record(
+            _build_png_bytes("yellow"),
+            added_by="1",
+            original_name="开心奶龙",
+            file_extension=".png",
+        )
+        await self.store.add_record(
+            _build_png_bytes("green"),
+            added_by="2",
+            original_name="生气奶龙",
+            file_extension=".png",
+        )
+
+        matched = await self.store.fuzzy_find_by_name("开心")
+        self.assertIsNotNone(matched)
+        assert matched is not None
+        index, record = matched
+        self.assertEqual(index, 1)
+        self.assertEqual(record.display_name, "开心奶龙")
+
+    async def test_forward_mode_setting_persists(self) -> None:
+        self.assertFalse(await self.store.is_forward_mode_enabled("10001"))
+        self.assertTrue(await self.store.set_forward_mode("10001", True))
+        self.assertTrue(await self.store.is_forward_mode_enabled("10001"))
+        self.assertFalse(await self.store.set_forward_mode("10001", True))
+        self.assertTrue(await self.store.set_forward_mode("10001", False))
+        self.assertFalse(await self.store.is_forward_mode_enabled("10001"))
+
     async def test_add_segment_record_persists_face_segment(self) -> None:
         segment = find_storable_segment(Message("[CQ:face,id=123]"))
         assert segment is not None
@@ -383,6 +431,17 @@ def _build_png_bytes(color: str) -> bytes:
 
 def _build_bmp_bytes(color: str) -> bytes:
     return _build_image_bytes(color, "BMP")
+
+
+def _build_split_png_bytes(left_color: str, right_color: str) -> bytes:
+    image = Image.new("RGB", (16, 16), color=left_color)
+    right_pixel = Image.new("RGB", (1, 1), color=right_color).getpixel((0, 0))
+    for x in range(8, 16):
+        for y in range(16):
+            image.putpixel((x, y), right_pixel)
+    buffer = BytesIO()
+    image.save(buffer, format="PNG")
+    return buffer.getvalue()
 
 
 def _build_image_bytes(color: str, image_format: str) -> bytes:

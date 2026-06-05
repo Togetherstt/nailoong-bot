@@ -8,12 +8,14 @@ from nonebot.adapters.onebot.v11 import Message, MessageSegment
 from src.plugins.joke_library.store import (
     JokeContentSegment,
     JokeStore,
-    PreparedJoke,
     PreparedImageFile,
+    PreparedJoke,
+    detect_auto_tag,
     extract_command,
     is_valid_fuzzy_query,
     normalize_tag,
     parse_joke_id,
+    prepare_joke_from_message,
     prepare_joke_from_reply,
 )
 
@@ -26,8 +28,8 @@ class FixedChoiceRandom:
 
 class JokeLibraryHelperTestCase(unittest.IsolatedAsyncioTestCase):
     async def test_prepare_joke_from_text_reply(self) -> None:
-        prepared = await prepare_joke_from_reply(Message("你好啊  世界"), _fake_image_downloader)
-        self.assertEqual(prepared.plain_text, "你好啊 世界")
+        prepared = await prepare_joke_from_reply(Message("你好呀 世界"), _fake_image_downloader)
+        self.assertEqual(prepared.plain_text, "你好呀 世界")
         self.assertEqual(len(prepared.segments), 1)
         self.assertEqual(prepared.segments[0].segment_type, "text")
         self.assertEqual(prepared.image_files, [])
@@ -38,6 +40,14 @@ class JokeLibraryHelperTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(prepared.image_files), 1)
         self.assertEqual(prepared.segments[0].kind, "local_image")
         self.assertEqual(prepared.segments[1].segment_type, "text")
+
+    async def test_prepare_joke_from_message_works_for_direct_message(self) -> None:
+        message = Message([MessageSegment.text("张老师今天又来了"), MessageSegment.face(123)])
+        prepared = await prepare_joke_from_message(message, _fake_image_downloader)
+        self.assertEqual(prepared.plain_text, "张老师今天又来了")
+        self.assertEqual(len(prepared.segments), 2)
+        self.assertEqual(prepared.segments[0].segment_type, "text")
+        self.assertEqual(prepared.segments[1].segment_type, "face")
 
     def test_extract_command(self) -> None:
         self.assertEqual(extract_command("/随机笑话"), ("/随机笑话", None))
@@ -57,6 +67,11 @@ class JokeLibraryHelperTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(parse_joke_id("0"))
         self.assertIsNone(parse_joke_id("abc"))
 
+    def test_detect_auto_tag(self) -> None:
+        self.assertEqual(detect_auto_tag("今天张老师又来了"), "张雪峰")
+        self.assertEqual(detect_auto_tag("这也太巧乐兹了"), "张雪峰")
+        self.assertEqual(detect_auto_tag("普通文本"), None)
+
 
 class JokeStoreTestCase(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
@@ -73,7 +88,7 @@ class JokeStoreTestCase(unittest.IsolatedAsyncioTestCase):
 
     async def test_add_prepared_joke_assigns_incremental_id(self) -> None:
         first, created_first = await self.store.add_prepared_joke(
-            _build_text_joke("今天好热"),
+            _build_text_joke("今天天气热"),
             provided_by="10001",
             tag="天气",
             provided_at=datetime(2026, 6, 4, 12, 0, 0),
@@ -106,6 +121,15 @@ class JokeStoreTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(created_second)
         self.assertEqual(first.id, second.id)
         self.assertEqual(first.tag, second.tag)
+
+    async def test_add_prepared_joke_can_store_auto_detected_tag(self) -> None:
+        record, created = await self.store.add_prepared_joke(
+            _build_text_joke("张雪峰和雪碧都在这里"),
+            provided_by="10001",
+            tag=detect_auto_tag("张雪峰和雪碧都在这里"),
+        )
+        self.assertTrue(created)
+        self.assertEqual(record.tag, "张雪峰")
 
     async def test_random_record_supports_tag_filter(self) -> None:
         await self.store.add_prepared_joke(_build_text_joke("通用一"), provided_by="1", tag=None)

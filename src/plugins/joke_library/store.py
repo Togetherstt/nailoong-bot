@@ -20,6 +20,15 @@ IMAGE_DIR = DATA_DIR / "images"
 INDEX_PATH = DATA_DIR / "index.json"
 GENERAL_TAG_LABEL = "通用"
 MAX_FUZZY_QUERY_CHARS = 10
+AUTO_ZHANG_XUEFENG_TAG = "张雪峰"
+AUTO_ZHANG_XUEFENG_KEYWORDS = (
+    "张老师",
+    "张师",
+    "张雪峰",
+    "雪峰",
+    "巧乐兹",
+    "雪碧",
+)
 
 ImageDownloader = Callable[[str], Awaitable[bytes]]
 
@@ -225,7 +234,11 @@ class JokeStore:
                 raw_segments = item.get("segments", [])
                 if not isinstance(raw_segments, list):
                     continue
-                segments = [JokeContentSegment(**segment) for segment in raw_segments if isinstance(segment, dict)]
+                segments = [
+                    JokeContentSegment(**segment)
+                    for segment in raw_segments
+                    if isinstance(segment, dict)
+                ]
                 record = JokeRecord(
                     id=int(item["id"]),
                     tag=item.get("tag"),
@@ -289,22 +302,24 @@ class JokeStore:
         }
 
 
-async def prepare_joke_from_reply(
-    reply_message: Message,
+async def prepare_joke_from_message(
+    message: Message,
     image_downloader: ImageDownloader,
 ) -> PreparedJoke:
     stored_segments: list[JokeContentSegment] = []
     image_files: list[PreparedImageFile] = []
     fingerprint_parts: list[dict[str, Any]] = []
 
-    for segment in reply_message:
+    for segment in message:
         if segment.type == "image":
             image_url = _extract_image_url(segment)
             if image_url:
                 image_bytes = await image_downloader(image_url)
                 image_digest = hashlib.sha256(image_bytes).hexdigest()
                 filename = f"{uuid4().hex}{guess_extension_from_url(image_url)}"
-                stored_segments.append(JokeContentSegment(kind="local_image", image_filename=filename))
+                stored_segments.append(
+                    JokeContentSegment(kind="local_image", image_filename=filename)
+                )
                 image_files.append(PreparedImageFile(filename=filename, content=image_bytes))
                 fingerprint_parts.append({"type": "image", "sha256": image_digest})
                 continue
@@ -335,10 +350,17 @@ async def prepare_joke_from_reply(
     fingerprint = hashlib.sha256(fingerprint_source.encode("utf-8")).hexdigest()
     return PreparedJoke(
         fingerprint=fingerprint,
-        plain_text=normalize_search_text(reply_message.extract_plain_text()),
+        plain_text=normalize_search_text(message.extract_plain_text()),
         segments=stored_segments,
         image_files=image_files,
     )
+
+
+async def prepare_joke_from_reply(
+    reply_message: Message,
+    image_downloader: ImageDownloader,
+) -> PreparedJoke:
+    return await prepare_joke_from_message(reply_message, image_downloader)
 
 
 def extract_command(plain_text: str) -> tuple[str, Optional[str]]:
@@ -360,6 +382,16 @@ def normalize_tag(tag: Optional[str]) -> Optional[str]:
 
 def normalize_search_text(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
+
+
+def detect_auto_tag(text: str) -> Optional[str]:
+    normalized_text = normalize_search_text(text)
+    if not normalized_text:
+        return None
+    for keyword in AUTO_ZHANG_XUEFENG_KEYWORDS:
+        if keyword in normalized_text:
+            return AUTO_ZHANG_XUEFENG_TAG
+    return None
 
 
 def is_valid_fuzzy_query(query: str) -> bool:

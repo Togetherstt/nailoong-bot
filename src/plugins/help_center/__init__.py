@@ -23,17 +23,13 @@ async def handle_help_message(bot: Bot, event: MessageEvent) -> None:
             "`/昔涟 help`：查看昔涟功能帮助。\n"
             "`/笑话 help`：查看笑话功能帮助。\n"
             "`/猜卡 help`：查看杀戮尖塔猜卡帮助。\n"
-            "说明：总 `/help` 需要 @机器人，以上五个分支帮助不需要。"
+            "说明：总 `/help` 需要 @机器人；其余分支 help 仍按各插件自己的触发规则使用。"
         )
     else:
         message = (
             "功能总帮助：\n"
             "`/猜卡 help`：查看杀戮尖塔猜卡帮助。\n"
-            "说明：当前群仅开放杀戮尖塔插件接口。"
+            "说明：当前群默认仅开放杀戮尖塔插件。"
         )
 
-    await bot.send(
-        event,
-        message,
-        reply_message=True,
-    )
+    await bot.send(event, message, reply_message=True)

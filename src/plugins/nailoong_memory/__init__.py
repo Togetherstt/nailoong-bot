@@ -4,7 +4,7 @@ from typing import Optional
 
 import httpx
 from nonebot import get_driver, logger, on_message
-from nonebot.adapters.onebot.v11 import Bot, MessageEvent
+from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, Message, MessageEvent, MessageSegment
 from nonebot.rule import to_me
 from src.plugins.utils.group_scope import is_extra_plugin_enabled
 
@@ -33,6 +33,10 @@ async def handle_nailoong_message(bot: Bot, event: MessageEvent) -> None:
         "/奶龙列表",
         "/删除奶龙",
         "/撤销删除奶龙",
+        "/编号查找奶龙",
+        "/模糊查找奶龙",
+        "/奶龙套皮",
+        "/奶龙去皮",
     }:
         return
 
@@ -47,7 +51,23 @@ async def handle_nailoong_message(bot: Bot, event: MessageEvent) -> None:
         await _handle_random_nailoong(bot, event)
         return
 
+    if command == "/编号查找奶龙":
+        await _handle_find_nailoong_by_index(bot, event, argument)
+        return
+
+    if command == "/模糊查找奶龙":
+        await _handle_fuzzy_find_nailoong(bot, event, argument)
+        return
+
     if not _is_admin_user(event):
+        return
+
+    if command == "/奶龙套皮":
+        await _handle_toggle_forward_mode(bot, event, enabled=True)
+        return
+
+    if command == "/奶龙去皮":
+        await _handle_toggle_forward_mode(bot, event, enabled=False)
         return
 
     if command == "/奶龙列表":
@@ -178,7 +198,48 @@ async def _handle_random_nailoong(bot: Bot, event: MessageEvent) -> None:
         )
         return
 
+    if isinstance(event, GroupMessageEvent) and await store.is_forward_mode_enabled(str(event.group_id)):
+        await _send_forward_nailoong(bot, event, record)
+        return
+
     await bot.send(event, store.message_for_record(record), reply_message=True)
+
+
+async def _handle_find_nailoong_by_index(
+    bot: Bot,
+    event: MessageEvent,
+    argument: Optional[str],
+) -> None:
+    if argument is None or not argument.isdigit():
+        await bot.send(event, "请使用 `@机器人 /编号查找奶龙 序号`。", reply_message=True)
+        return
+
+    record = await store.find_by_index(int(argument))
+    if record is None:
+        await bot.send(event, "没有找到对应序号的奶龙。", reply_message=True)
+        return
+
+    await bot.send(event, store.message_for_record(record), reply_message=True)
+
+
+async def _handle_fuzzy_find_nailoong(
+    bot: Bot,
+    event: MessageEvent,
+    argument: Optional[str],
+) -> None:
+    if argument is None or not argument.strip():
+        await bot.send(event, "请使用 `@机器人 /模糊查找奶龙 名称关键字`。", reply_message=True)
+        return
+
+    matched = await store.fuzzy_find_by_name(argument)
+    if matched is None:
+        await bot.send(event, "当前没有可供匹配的奶龙名称。", reply_message=True)
+        return
+
+    index, record = matched
+    message = store.message_for_record(record)
+    message.append(MessageSegment.text(f"\n库存序号：{index}"))
+    await bot.send(event, message, reply_message=True)
 
 
 async def _handle_list_nailoong(bot: Bot, event: MessageEvent) -> None:
@@ -256,6 +317,30 @@ async def _handle_undo_delete(bot: Bot, event: MessageEvent) -> None:
     )
 
 
+async def _handle_toggle_forward_mode(
+    bot: Bot,
+    event: MessageEvent,
+    *,
+    enabled: bool,
+) -> None:
+    if not isinstance(event, GroupMessageEvent):
+        await bot.send(event, "奶龙套皮功能仅支持群聊使用。", reply_message=True)
+        return
+
+    changed = await store.set_forward_mode(str(event.group_id), enabled)
+    if enabled:
+        if changed:
+            await bot.send(event, "本群已开启奶龙套皮。之后 `/随机奶龙` 会以合并转发消息形式发送。", reply_message=True)
+            return
+        await bot.send(event, "本群已经处于奶龙套皮状态。", reply_message=True)
+        return
+
+    if changed:
+        await bot.send(event, "本群已关闭奶龙套皮。之后 `/随机奶龙` 会恢复为直接发送。", reply_message=True)
+        return
+    await bot.send(event, "本群当前未开启奶龙套皮。", reply_message=True)
+
+
 async def _handle_help(bot: Bot, event: MessageEvent, argument: Optional[str]) -> None:
     help_arg = (argument or "").strip().lower()
     if help_arg not in {"help", "帮助"}:
@@ -267,10 +352,14 @@ async def _handle_help(bot: Bot, event: MessageEvent, argument: Optional[str]) -
             "奶龙功能用法：\n"
             "1. 先引用一张奶龙图片或 QQ 表情，再发送 `@机器人 /添加奶龙 名称可选`。\n"
             "2. 发送 `@机器人 /随机奶龙`，随机抽取一条奶龙记录。\n"
-            "3. 管理员可发送 `@机器人 /奶龙列表` 查看库存。\n"
-            "4. 管理员可发送 `@机器人 /删除奶龙 序号`、`@机器人 /删除奶龙 名称` 或 `@机器人 /删除奶龙 最近一个` 删除记录。\n"
-            "5. 管理员可发送 `@机器人 /撤销删除奶龙` 恢复最近一次删除。\n"
-            "6. 发送 `/奶龙 help` 查看本帮助。\n"
+            "3. 发送 `@机器人 /编号查找奶龙 序号`，按库存序号查找奶龙。\n"
+            "4. 发送 `@机器人 /模糊查找奶龙 名称关键字`，按奶龙名称模糊查找。\n"
+            "5. 管理员可发送 `@机器人 /奶龙套皮`，让本群 `/随机奶龙` 改为合并转发形式发送。\n"
+            "6. 管理员可发送 `@机器人 /奶龙去皮`，关闭合并转发形式发送。\n"
+            "7. 管理员可发送 `@机器人 /奶龙列表` 查看库存。\n"
+            "8. 管理员可发送 `@机器人 /删除奶龙 序号`、`@机器人 /删除奶龙 名称` 或 `@机器人 /删除奶龙 最近一个` 删除记录。\n"
+            "9. 管理员可发送 `@机器人 /撤销删除奶龙` 恢复最近一次删除。\n"
+            "10. 发送 `/奶龙 help` 查看本帮助。\n"
             "说明：奶龙上传已启用 `sha256 + dHash` 双层去重；只有 `/奶龙 help` 不需要 @机器人，其他奶龙命令仍然需要。"
         ),
         reply_message=True,
@@ -297,3 +386,35 @@ def _get_admin_qq() -> Optional[str]:
         return None
     value = str(admin_qq).strip()
     return value or None
+
+
+async def _send_forward_nailoong(bot: Bot, event: GroupMessageEvent, record) -> None:
+    payload = store.message_for_record(record)
+    content_lines = []
+    message = Message()
+
+    for segment in payload:
+        if segment.type == "text":
+            text = str(segment.data.get("text", ""))
+            if text:
+                content_lines.append(text)
+            continue
+        message.append(segment)
+
+    if content_lines:
+        message.append(MessageSegment.text("".join(content_lines)))
+
+    await bot.call_api(
+        "send_group_forward_msg",
+        group_id=event.group_id,
+        messages=[
+            {
+                "type": "node",
+                "data": {
+                    "name": "奶龙库存",
+                    "uin": str(bot.self_id),
+                    "content": message,
+                },
+            }
+        ],
+    )

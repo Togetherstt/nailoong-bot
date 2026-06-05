@@ -4,22 +4,25 @@ from typing import Optional
 
 import httpx
 from nonebot import get_driver, logger, on_message
-from nonebot.adapters.onebot.v11 import Bot, MessageEvent
+from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, MessageEvent
 from src.plugins.utils.group_scope import is_extra_plugin_enabled
 
 from .store import (
     JokeStore,
+    detect_auto_tag,
     extract_command,
     is_valid_fuzzy_query,
     normalize_search_text,
     normalize_tag,
     parse_joke_id,
+    prepare_joke_from_message,
     prepare_joke_from_reply,
 )
 
 
 store = JokeStore()
 joke_message = on_message(priority=10, block=False)
+auto_joke_message = on_message(priority=50, block=False)
 
 
 @joke_message.handle()
@@ -61,6 +64,47 @@ async def handle_joke_message(bot: Bot, event: MessageEvent) -> None:
     await _handle_help(bot, event, argument)
 
 
+@auto_joke_message.handle()
+async def handle_auto_collect_joke(bot: Bot, event: MessageEvent) -> None:
+    if not isinstance(event, GroupMessageEvent):
+        return
+    if not is_extra_plugin_enabled(event):
+        return
+    if str(event.user_id) == str(bot.self_id):
+        return
+
+    plain_text = normalize_search_text(event.get_message().extract_plain_text())
+    if not plain_text or plain_text.startswith("/"):
+        return
+
+    auto_tag = detect_auto_tag(plain_text)
+    if auto_tag is None:
+        return
+
+    try:
+        prepared = await prepare_joke_from_message(event.message, _download_image)
+        record, created = await store.add_prepared_joke(
+            prepared,
+            provided_by=str(event.user_id),
+            tag=auto_tag,
+        )
+    except httpx.HTTPError:
+        logger.exception("Failed to download image for auto-collected joke")
+        await bot.send(event, "自动归档笑话时，消息中的图片下载失败。", reply_message=True)
+    except ValueError:
+        return
+    except Exception:
+        logger.exception("Failed to auto-collect joke")
+        await bot.send(event, "自动归档笑话时发生异常，请稍后再试。", reply_message=True)
+        return
+
+    await bot.send(
+        event,
+        _build_upload_result_message(record, created, auto_collected=True),
+        reply_message=True,
+    )
+
+
 async def _handle_upload_joke(bot: Bot, event: MessageEvent, argument: Optional[str]) -> None:
     if event.reply is None:
         await bot.send(
@@ -89,10 +133,11 @@ async def _handle_upload_joke(bot: Bot, event: MessageEvent, argument: Optional[
         return
 
     try:
+        effective_tag = detect_auto_tag(prepared.plain_text) or argument
         record, created = await store.add_prepared_joke(
             prepared,
             provided_by=str(event.user_id),
-            tag=argument,
+            tag=effective_tag,
         )
     except Exception:
         logger.exception("Failed to persist joke record")
@@ -100,30 +145,10 @@ async def _handle_upload_joke(bot: Bot, event: MessageEvent, argument: Optional[
         return
 
     if created:
-        await bot.send(
-            event,
-            (
-                f"上传成功。\n"
-                f"笑话编号：{record.id}\n"
-                f"归属标签：{record.display_tag}\n"
-                f"提供人QQ：{record.provided_by}\n"
-                f"提供时间：{record.provided_at}"
-            ),
-            reply_message=True,
-        )
+        await bot.send(event, _build_upload_result_message(record, created), reply_message=True)
         return
 
-    await bot.send(
-        event,
-        (
-            f"这条笑话已经存在，无需重复上传。\n"
-            f"笑话编号：{record.id}\n"
-            f"归属标签：{record.display_tag}\n"
-            f"提供人QQ：{record.provided_by}\n"
-            f"提供时间：{record.provided_at}"
-        ),
-        reply_message=True,
-    )
+    await bot.send(event, _build_upload_result_message(record, created), reply_message=True)
 
 
 async def _handle_random_joke(bot: Bot, event: MessageEvent, argument: Optional[str]) -> None:
@@ -214,7 +239,9 @@ async def _handle_help(bot: Bot, event: MessageEvent, argument: Optional[str]) -
             "5. 发送 `/模糊查找笑话 关键字段`，按不超过 10 个字的关键词查找最匹配的笑话。\n"
             "6. 发送 `/编号查找 编号`，按笑话编号查找。\n"
             "7. 发送 `/删除笑话 编号`，仅管理员可删除。\n"
-            "8. 发送 `/笑话 help` 查看本帮助。\n"
+            "8. 群内若有人直接发送包含“张老师”“张师”“张雪峰”“雪峰”“巧乐兹”“雪碧”的消息，也会被自动归档到 `张雪峰` tag，并正常提示入库结果。\n"
+            "9. 若手动上传时引用内容包含这些关键词，也会自动归档到 `张雪峰` tag。\n"
+            "10. 发送 `/笑话 help` 查看本帮助。\n"
             "说明：以上命令都不需要 @机器人；上传时会自动去重，重复笑话不会重复入库。"
         ),
         reply_message=True,
@@ -241,3 +268,18 @@ def _get_admin_qq() -> Optional[str]:
         return None
     value = str(admin_qq).strip()
     return value or None
+
+
+def _build_upload_result_message(record, created: bool, auto_collected: bool = False) -> str:
+    if auto_collected:
+        prefix = "自动归档成功。" if created else "这条笑话已经存在，已跳过重复归档。"
+    else:
+        prefix = "上传成功。" if created else "这条笑话已经存在，无需重复上传。"
+
+    return (
+        f"{prefix}\n"
+        f"笑话编号：{record.id}\n"
+        f"归属标签：{record.display_tag}\n"
+        f"提供人QQ：{record.provided_by}\n"
+        f"提供时间：{record.provided_at}"
+    )
