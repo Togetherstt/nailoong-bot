@@ -65,6 +65,19 @@
 
 - `@机器人 /help`
 
+### 群范围规则
+
+- 所有群默认开放：
+  - 杀戮尖塔猜卡
+  - `/猜卡 help`
+  - `@机器人 /help` 中的猜卡帮助入口
+- 只有 `EXTRA_PLUGIN_GROUP_IDS` 指定的群才额外开放：
+  - 奶龙
+  - 谐音盒
+  - 昔涟
+  - 笑话梗库
+  - 对应的分插件 help
+
 ## 项目结构
 
 ```text
@@ -135,6 +148,7 @@ PORT=8080
 COMMAND_START=["/"]
 ONEBOT_ACCESS_TOKEN=replace-with-your-token
 ADMIN_QQ=123456789
+EXTRA_PLUGIN_GROUP_IDS=123456789,987654321
 HOMOPHONE_GROUP_IDS=123456789,987654321
 SUPERUSERS=[]
 VISION_API_URL=https://api.example.com/v1/chat/completions
@@ -152,8 +166,12 @@ STS_CARD_DATA_DIR=data/sts_card_guess/cards
   - NapCatQQ 与本项目之间的访问令牌，两边必须一致。
 - `ADMIN_QQ`
   - 管理员 QQ。奶龙管理、笑话删除、猜卡测试、昔涟开关等功能依赖它。
+- `EXTRA_PLUGIN_GROUP_IDS`
+  - 允许开放“除杀戮尖塔猜卡外其他插件”的群号白名单。
+  - 不在这个列表中的群，默认只开放猜卡相关接口。
 - `HOMOPHONE_GROUP_IDS`
   - 允许触发谐音盒的群号白名单。
+  - 即使群在 `EXTRA_PLUGIN_GROUP_IDS` 里，谐音盒仍需同时命中这个白名单才可用。
 - `VISION_API_*`
   - 预留给多模态或文本接口的上游配置。
 - `XILIAN_API_*`
@@ -405,6 +423,11 @@ python scripts/test_sts_card_guess_local.py --card 暴走
 ```text
 @机器人 /help
 ```
+
+说明：
+
+- 普通群里，总帮助只会显示 `/猜卡 help`。
+- 只有 `EXTRA_PLUGIN_GROUP_IDS` 指定群里，总帮助才会显示完整插件帮助列表。
 
 ## 数据持久化
 

@@ -5,6 +5,7 @@ from typing import Optional
 import httpx
 from nonebot import get_driver, logger, on_message
 from nonebot.adapters.onebot.v11 import Bot, MessageEvent
+from src.plugins.utils.group_scope import is_extra_plugin_enabled
 
 from .store import (
     JokeStore,
@@ -32,6 +33,9 @@ async def handle_joke_message(bot: Bot, event: MessageEvent) -> None:
         "/删除笑话",
         "/笑话",
     }:
+        return
+
+    if not is_extra_plugin_enabled(event):
         return
 
     if command == "/上传笑话":

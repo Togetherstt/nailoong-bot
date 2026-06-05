@@ -5,6 +5,7 @@ from typing import Optional
 from nonebot import get_driver, logger, on_message
 from nonebot.adapters.onebot.v11 import Bot, MessageEvent
 from nonebot.rule import to_me
+from src.plugins.utils.group_scope import is_extra_plugin_enabled
 
 from .client import XiLianApiError, build_api_config, generate_xilian_text
 from .store import XiLianModeStore, extract_command, is_valid_quoted_text
@@ -25,6 +26,9 @@ async def handle_xilian_message(bot: Bot, event: MessageEvent) -> None:
         "/关闭昔涟模式",
         "/昔涟",
     }:
+        return
+
+    if not is_extra_plugin_enabled(event):
         return
 
     if command == "/昔涟":
@@ -99,6 +103,8 @@ async def handle_xilian_message(bot: Bot, event: MessageEvent) -> None:
 async def handle_xilian_help_message(bot: Bot, event: MessageEvent) -> None:
     command, argument = extract_command(event.get_message().extract_plain_text())
     if command != "/昔涟":
+        return
+    if not is_extra_plugin_enabled(event):
         return
     await _handle_help(bot, event, argument)
 

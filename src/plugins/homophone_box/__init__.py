@@ -7,6 +7,7 @@ from typing import Optional
 from nonebot import get_driver, on_message
 from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, MessageEvent
 from nonebot.rule import to_me
+from src.plugins.utils.group_scope import is_extra_plugin_enabled
 
 from .store import (
     HomophoneMatch,
@@ -47,6 +48,9 @@ async def handle_homophone_message(bot: Bot, event: MessageEvent) -> None:
     }:
         return
 
+    if not is_extra_plugin_enabled(event):
+        return
+
     if command in {"/谐音盒", "/盒"} and (argument or "").strip().lower() in {"help", "帮助"}:
         await _handle_help(bot, event)
         return
@@ -78,6 +82,9 @@ async def handle_homophone_message(bot: Bot, event: MessageEvent) -> None:
 async def handle_quick_homophone_message(bot: Bot, event: MessageEvent) -> None:
     command, argument = _extract_command(event.get_message().extract_plain_text())
     if command != "/盒":
+        return
+
+    if not is_extra_plugin_enabled(event):
         return
 
     if (argument or "").strip().lower() in {"help", "帮助"}:

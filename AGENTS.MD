@@ -109,6 +109,7 @@ HOST=127.0.0.1
 PORT=8080
 ONEBOT_ACCESS_TOKEN=replace-with-your-token
 ADMIN_QQ=123456789
+EXTRA_PLUGIN_GROUP_IDS=123456789,987654321
 HOMOPHONE_GROUP_IDS=123456789,987654321
 VISION_API_URL=https://api.example.com/v1/chat/completions
 VISION_API_KEY=sk-xxxxxx
@@ -165,6 +166,9 @@ STS_CARD_DATA_DIR=data/sts_card_guess/cards
    - 新功能应尽量独立为单插件，不与其他插件状态无序耦合。
 7. **文档同步**
    - 行为发生用户可感知变化时，`README.md` 与 `AGENTS.MD` 都要同步更新。
+8. **群范围控制**
+   - 当前版本默认对所有群仅开放杀戮尖塔猜卡插件。
+   - 其他插件仅允许在 `.env` 的 `EXTRA_PLUGIN_GROUP_IDS` 指定群中生效。
 
 ## 7. 日志与安全约定
 
@@ -219,7 +223,8 @@ STS_CARD_DATA_DIR=data/sts_card_guess/cards
 
 ### `homophone_box`
 
-- 仅白名单群可用。
+- 仅在 `EXTRA_PLUGIN_GROUP_IDS` 指定群中可用。
+- 同时仍受 `HOMOPHONE_GROUP_IDS` 白名单限制。
 - 首字母长度支持 `2` 到 `5`。
 - 支持中文单字、英文首字母、英文整词命中。
 - 命中结果超过 `10` 条时只返回 `10` 条。
@@ -228,6 +233,7 @@ STS_CARD_DATA_DIR=data/sts_card_guess/cards
 
 ### `xilian_style`
 
+- 仅在 `EXTRA_PLUGIN_GROUP_IDS` 指定群中可用。
 - 使用 Responses API 形态调用上游模型。
 - 输入上限 `200` 字，输出上限 `200` 字。
 - 输出必须以单个 `♪` 结尾。
@@ -235,6 +241,7 @@ STS_CARD_DATA_DIR=data/sts_card_guess/cards
 
 ### `joke_library`
 
+- 仅在 `EXTRA_PLUGIN_GROUP_IDS` 指定群中可用。
 - 支持引用上传、tag 分类、随机抽取、模糊查找、编号查找、删除。
 - `/删除笑话` 仅管理员可用。
 - 随机笑话只展示内容与编号。
@@ -244,6 +251,7 @@ STS_CARD_DATA_DIR=data/sts_card_guess/cards
 
 - 卡池默认读取 `data/sts_card_guess/cards/`，也可由 `STS_CARD_DATA_DIR` 覆盖。
 - 当前为整池随机，不做来源过滤。
+- 当前为所有群默认开放的唯一插件。
 - 来源展示统一为：
   - `故障机器人`
   - `静默猎手`
@@ -260,8 +268,9 @@ STS_CARD_DATA_DIR=data/sts_card_guess/cards
 
 ### `help_center`
 
-- 分插件帮助不需要 `@机器人`。
 - 总帮助固定为 `@机器人 /help`。
+- 若当前群不在 `EXTRA_PLUGIN_GROUP_IDS` 内，总帮助只展示猜卡帮助入口。
+- 除 `/猜卡 help` 外，其他分插件帮助仅在 `EXTRA_PLUGIN_GROUP_IDS` 指定群可用。
 
 ## 10. 更新日志
 
@@ -270,6 +279,10 @@ STS_CARD_DATA_DIR=data/sts_card_guess/cards
 ### 2026-06-05 10:15
 - 文档维护约定调整：`AGENTS.MD` 在重构时必须保留原有仍然有效的工程约束语言与历史更新日志，不应因结构整理而整体丢弃历史记录。
 - 脱敏约定补充：历史日志若出现真实管理员账号、群号、访问令牌或其他敏感信息，应统一替换为 `ADMIN_QQ`、群白名单或等价占位描述，但保留原本约束语义。
+
+### 2026-06-05 10:42
+- 群插件范围约定调整：当前版本对所有群默认只开放杀戮尖塔猜卡插件与 `/猜卡 help`；奶龙、谐音盒、昔涟、笑话梗库及其帮助入口，仅在 `.env` 中 `EXTRA_PLUGIN_GROUP_IDS` 指定的群里开放。
+- 总帮助约定调整：`@机器人 /help` 在普通群只展示猜卡帮助入口，在 `EXTRA_PLUGIN_GROUP_IDS` 指定群中才展示完整插件帮助列表。
 
 ### 2026-06-04 02:18
 - 新增需求：实现“杀戮尖塔猜卡牌”插件，数据源默认读取仓库内 `data/sts_card_guess/cards/` 下的卡牌 JSON，也允许通过 `.env` 中 `STS_CARD_DATA_DIR` 覆盖，并独立维护在 `src/plugins/sts_card_guess/` 下。

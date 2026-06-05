@@ -6,6 +6,7 @@ import httpx
 from nonebot import get_driver, logger, on_message
 from nonebot.adapters.onebot.v11 import Bot, MessageEvent
 from nonebot.rule import to_me
+from src.plugins.utils.group_scope import is_extra_plugin_enabled
 
 from .store import (
     NailoongStore,
@@ -35,6 +36,9 @@ async def handle_nailoong_message(bot: Bot, event: MessageEvent) -> None:
     }:
         return
 
+    if not is_extra_plugin_enabled(event):
+        return
+
     if command == "/添加奶龙":
         await _handle_add_nailoong(bot, event, argument)
         return
@@ -61,6 +65,8 @@ async def handle_nailoong_message(bot: Bot, event: MessageEvent) -> None:
 async def handle_nailoong_help_message(bot: Bot, event: MessageEvent) -> None:
     command, argument = extract_command_name(event.message)
     if command != "/奶龙":
+        return
+    if not is_extra_plugin_enabled(event):
         return
     await _handle_help(bot, event, argument)
 
